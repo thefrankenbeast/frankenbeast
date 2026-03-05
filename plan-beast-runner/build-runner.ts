@@ -70,7 +70,7 @@ let DB_FILE = resolve(BUILD_DIR, 'build-traces.db');
 let BASE_BRANCH = 'feat/close-execution-gap';
 const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-4-6';
 const DEFAULT_CODEX_MODEL = 'codex';
-const ITERATION_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes
+const ITERATION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
 const DEFAULT_CODEX_CMD = 'codex';
 const DEFAULT_CODEX_ARGS: string[] = ['exec', '--full-auto', '--json', '--color', 'never'];
 
@@ -157,18 +157,119 @@ http://localhost:<port> (default 4040).
 `);
 }
 
+// ── ANSI Helpers ──
+
+const ANSI = {
+  reset: '\x1b[0m',
+  bold: '\x1b[1m',
+  dim: '\x1b[2m',
+  red: '\x1b[31m',
+  green: '\x1b[32m',
+  yellow: '\x1b[33m',
+  blue: '\x1b[34m',
+  magenta: '\x1b[35m',
+  cyan: '\x1b[36m',
+  white: '\x1b[37m',
+  gray: '\x1b[90m',
+  bgRed: '\x1b[41m',
+  bgGreen: '\x1b[42m',
+  bgYellow: '\x1b[43m',
+  bgCyan: '\x1b[46m',
+} as const;
+
+// Strip ANSI codes for log file (plain text)
+function stripAnsi(s: string): string {
+  return s.replace(/\x1b\[[0-9;]*m/g, '');
+}
+
 // ── Logging ──
 
 let verboseMode = false;
 
-function log(level: 'info' | 'debug' | 'warn' | 'error', msg: string): void {
+type LogLevel = 'info' | 'debug' | 'warn' | 'error';
+
+const LEVEL_BADGE: Record<LogLevel, string> = {
+  debug: `${ANSI.gray}DEBUG${ANSI.reset}`,
+  info:  `${ANSI.cyan}${ANSI.bold} INFO${ANSI.reset}`,
+  warn:  `${ANSI.yellow}${ANSI.bold} WARN${ANSI.reset}`,
+  error: `${ANSI.red}${ANSI.bold}ERROR${ANSI.reset}`,
+};
+
+/** Highlight known service/tool patterns in verbose messages */
+function highlightServices(msg: string): string {
+  return msg
+    // Provider tags
+    .replace(/\[claude\]/g, `${ANSI.magenta}${ANSI.bold}[claude]${ANSI.reset}${ANSI.gray}`)
+    .replace(/\[codex\]/g, `${ANSI.blue}${ANSI.bold}[codex]${ANSI.reset}${ANSI.gray}`)
+    // Tool call arrows
+    .replace(/→ (\w+):/g, `${ANSI.cyan}→${ANSI.reset} ${ANSI.cyan}$1${ANSI.reset}:`)
+    // Result arrows
+    .replace(/← result:/g, `${ANSI.green}← result:${ANSI.reset}`)
+    // Git commands
+    .replace(/^(git .+)$/gm, `${ANSI.green}$1${ANSI.reset}`);
+}
+
+function log(level: LogLevel, msg: string): void {
   if (level === 'debug' && !verboseMode) return;
 
-  const prefix = level === 'info' ? '[beast]' : `[beast:${level}]`;
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const line = `[${timestamp}] ${prefix} ${msg}`;
-  console.log(line);
-  try { appendFileSync(LOG_FILE, line + '\n'); } catch {}
+  const now = new Date();
+  const ts = `${ANSI.gray}${now.toTimeString().slice(0, 8)}${ANSI.reset}`;
+  const badge = LEVEL_BADGE[level];
+
+  let colored = msg;
+  if (level === 'debug') {
+    colored = `${ANSI.gray}${highlightServices(msg)}${ANSI.reset}`;
+  } else if (level === 'warn') {
+    colored = `${ANSI.yellow}${msg}${ANSI.reset}`;
+  } else if (level === 'error') {
+    colored = `${ANSI.red}${msg}${ANSI.reset}`;
+  }
+
+  const display = `${ts} ${badge} ${colored}`;
+  console.log(display);
+
+  // Plain-text for log file
+  const plain = `[${now.toISOString().replace('T', ' ').slice(0, 19)}] [${level.toUpperCase().padStart(5)}] ${msg}`;
+  try { appendFileSync(LOG_FILE, plain + '\n'); } catch {}
+}
+
+/** Print a boxed header (no timestamp) */
+function logHeader(title: string): void {
+  const w = 60;
+  const pad = Math.max(0, w - title.length - 4);
+  const left = Math.floor(pad / 2);
+  const right = pad - left;
+  const line = `${ANSI.cyan}${'─'.repeat(w)}${ANSI.reset}`;
+  const mid = `${ANSI.cyan}│${ANSI.reset} ${' '.repeat(left)}${ANSI.bold}${ANSI.white}${title}${ANSI.reset}${' '.repeat(right)} ${ANSI.cyan}│${ANSI.reset}`;
+  console.log(`\n${line}\n${mid}\n${line}`);
+
+  try {
+    const plain = `\n${'─'.repeat(w)}\n│ ${' '.repeat(left)}${title}${' '.repeat(right)} │\n${'─'.repeat(w)}`;
+    appendFileSync(LOG_FILE, plain + '\n');
+  } catch {}
+}
+
+/** Format a budget bar: [$$$$$-----] 50% */
+function budgetBar(spent: number, limit: number): string {
+  const pct = Math.min(spent / limit, 1);
+  const width = 20;
+  const filled = Math.round(pct * width);
+  const empty = width - filled;
+  const pctNum = Math.round(pct * 100);
+
+  let barColor = ANSI.green;
+  if (pct >= 0.9) barColor = ANSI.red;
+  else if (pct >= 0.75) barColor = ANSI.yellow;
+  else if (pct >= 0.5) barColor = ANSI.yellow;
+
+  return `${barColor}[${'█'.repeat(filled)}${ANSI.gray}${'░'.repeat(empty)}${barColor}]${ANSI.reset} ${pctNum}% ($${spent.toFixed(2)}/$${limit.toFixed(0)})`;
+}
+
+/** Color PASS/FAIL status */
+function statusBadge(pass: boolean): string {
+  return pass
+    ? `${ANSI.bgGreen}${ANSI.bold} PASS ${ANSI.reset}`
+    : `${ANSI.bgRed}${ANSI.bold} FAIL ${ANSI.reset}`;
 }
 
 // ── Rate Limit Detection ──
@@ -439,6 +540,16 @@ function hasMeaningfulChange(previousHead: string): boolean {
   return head !== previousHead;
 }
 
+/** Check if the current branch has ANY commits vs BASE_BRANCH (catches impl commits during harden) */
+function hasBranchProgress(): boolean {
+  try {
+    const branchCommits = parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0;
+    return branchCommits > 0;
+  } catch {
+    return false;
+  }
+}
+
 function autoCommitIfDirty(chunkId: string, stage: string, iteration: number): boolean {
   const status = git('status --porcelain');
   if (status.length === 0) return false;
@@ -506,7 +617,8 @@ async function runRalphLoop(
     }
 
     const spanName = `${stage}:${chunkId}:iter-${iteration}`;
-    log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} starting... (${activeProvider})`);
+    const providerColor = activeProvider === 'claude' ? ANSI.magenta : ANSI.blue;
+    log('info', `${ANSI.bold}${stage}:${chunkId}${ANSI.reset} iter ${ANSI.bold}${iteration}/${maxIterations}${ANSI.reset} starting... (${providerColor}${ANSI.bold}${activeProvider}${ANSI.reset})`);
 
     const iterSpan = TraceContext.startSpan(trace, { name: spanName, parentSpanId: parentSpan.id });
     const startTime = Date.now();
@@ -554,21 +666,30 @@ async function runRalphLoop(
     });
     const runningCost = costCalc.totalCost(costEntries);
 
-    log('debug', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — exit code ${result.exitCode}, duration: ${durationS}s`);
-    log('debug', `tokens this iter: ~${estPromptTokens} prompt, ~${estCompletionTokens} completion`);
-    log('debug', `running cost: $${runningCost.toFixed(2)} / $${breaker.check(0).limitUsd}`);
+    log('debug', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — exit ${result.exitCode}, ${durationS}s, ~${estPromptTokens}+${estCompletionTokens} tokens`);
+    log('debug', `budget: ${stripAnsi(budgetBar(runningCost, breaker.check(0).limitUsd))}`);
 
     // Check for promise
     const promiseRegex = new RegExp(`<promise>${promiseTag}</promise>`);
     if (promiseRegex.test(result.stdout)) {
-      if (!hasMeaningfulChange(headBefore)) {
-        log('error', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — promise detected but no code changes; stopping.`);
+      // Auto-commit any dirty files the provider left uncommitted
+      autoCommitIfDirty(chunkId, stage, iteration);
+
+      const iterChanged = hasMeaningfulChange(headBefore);
+      const branchHasCommits = hasBranchProgress();
+
+      if (!iterChanged && !branchHasCommits) {
+        log('error', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — promise detected but no code changes on branch; stopping.`);
         SpanLifecycle.setMetadata(iterSpan, { noChanges: true });
         TraceContext.endSpan(iterSpan, { status: 'error', errorMessage: 'promise-without-changes' }, loopDetector);
         return { completed: false, iterations: iteration, output: lastOutput, rateLimitHits };
       }
 
-      log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — promise detected!`);
+      if (!iterChanged && branchHasCommits) {
+        log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — ${ANSI.green}${ANSI.bold}promise detected${ANSI.reset} ${ANSI.dim}(no new changes this iter, branch has prior commits)${ANSI.reset}`);
+      } else {
+        log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — ${ANSI.green}${ANSI.bold}promise detected!${ANSI.reset}`);
+      }
       TraceContext.endSpan(iterSpan, { status: 'completed' }, loopDetector);
       return { completed: true, iterations: iteration, output: lastOutput, rateLimitHits };
     }
@@ -580,7 +701,7 @@ async function runRalphLoop(
       const sleepMs = (resetSeconds + 180) * 1000;
       const resumeAt = new Date(Date.now() + sleepMs).toISOString();
 
-      log('warn', `Rate limited. Reset in ${resetSeconds}s. Sleeping until ${resumeAt} (reset + 3min buffer)...`);
+      log('warn', `${ANSI.yellow}⏳ Rate limited.${ANSI.reset} Reset in ${resetSeconds}s. Sleeping until ${resumeAt} ${ANSI.dim}(+3min buffer)${ANSI.reset}`);
 
       // Record rate limit span
       SpanLifecycle.setMetadata(iterSpan, {
@@ -597,7 +718,8 @@ async function runRalphLoop(
       const canSwitch = availableProviders.includes(otherProvider);
 
       if (canSwitch && !rateLimitedProviders.has(otherProvider)) {
-        log('warn', `Switching provider to ${otherProvider} after rate limit.`);
+        const otherColor = otherProvider === 'claude' ? ANSI.magenta : ANSI.blue;
+        log('warn', `Switching to ${otherColor}${ANSI.bold}${otherProvider}${ANSI.reset}${ANSI.yellow} after rate limit`);
         activeProvider = otherProvider;
         iteration--; // Don't count rate-limited iterations
         continue;
@@ -628,7 +750,7 @@ async function runRalphLoop(
       return { completed: false, iterations: iteration, output: lastOutput, rateLimitHits };
     }
 
-    log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — no promise yet, iterating...`);
+    log('info', `${stage}:${chunkId} iter ${iteration}/${maxIterations} — ${ANSI.yellow}no promise yet${ANSI.reset}, iterating...`);
 
     // Budget check
     const budgetResult = breaker.check(runningCost);
@@ -688,10 +810,10 @@ async function main() {
     log('info', 'Reset: cleared checkpoint, traces DB, and log');
   }
 
-  log('info', 'RALPH Build Runner starting...');
-  log('info', `Budget: $${args.budget} | Max iterations: ${args.maxIterations} | Provider: ${args.provider} | Verbose: ${args.verbose}`);
+  console.log(`\n${ANSI.bold}${ANSI.magenta}  ⚡ RALPH Build Runner${ANSI.reset} ${ANSI.dim}— observer-powered autonomous execution${ANSI.reset}\n`);
+  log('info', `Budget: $${args.budget} | Max iters: ${args.maxIterations} | Provider: ${ANSI.bold}${args.provider}${ANSI.reset} | Verbose: ${args.verbose}`);
   log('debug', `Plan dir: ${PLAN_DIR}`);
-  log('info', 'Note: token counts are estimated (~4 chars/token), not exact');
+  log('info', `Token counts are estimates (~4 chars/token)`);
 
   // Observer setup
   const counter = new TokenCounter();
@@ -706,7 +828,7 @@ async function main() {
   if (!args.noViewer) {
     server = new TraceServer({ adapter: sqliteAdapter, port: args.port });
     await server.start();
-    log('info', `Trace viewer: ${server.url}`);
+    log('info', `Trace viewer: ${ANSI.cyan}${ANSI.bold}${server.url}${ANSI.reset}`);
   }
 
   // SIGINT handler
@@ -724,7 +846,7 @@ async function main() {
 
   // Discover chunks
   const chunkFiles = discoverChunks();
-  log('info', `Found ${chunkFiles.length} chunks: ${chunkFiles.map(f => f.replace('.md', '')).join(', ')}`);
+  log('info', `Found ${ANSI.bold}${chunkFiles.length}${ANSI.reset} chunks: ${ANSI.dim}${chunkFiles.map(f => f.replace('.md', '')).join(', ')}${ANSI.reset}`);
 
   // Checkpoint
   const checkpoint = readCheckpoint();
@@ -740,13 +862,11 @@ async function main() {
     const chunkPath = resolve(PLAN_DIR, chunkFile);
 
     if (isChunkDone(checkpoint, chunkId)) {
-      log('info', `Skipping ${chunkId} (already merged)`);
+      log('info', `${ANSI.dim}Skipping ${chunkId} (already merged)${ANSI.reset}`);
       continue;
     }
 
-    log('info', `\n${'='.repeat(60)}`);
-    log('info', `Processing chunk: ${chunkId}`);
-    log('info', `${'='.repeat(60)}`);
+    logHeader(`chunk: ${chunkId}`);
 
     const chunkStart = Date.now();
     const chunkSpan = TraceContext.startSpan(trace, { name: `chunk:${chunkId}` });
@@ -789,38 +909,40 @@ async function main() {
       chunkRateLimitHits += implResult.rateLimitHits;
 
       if (implResult.completed) {
+        // Safety: auto-commit any dirty files left by provider
+        autoCommitIfDirty(chunkId, 'impl-final', implResult.iterations);
         const implCommits = parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0;
         if (implCommits === 0) {
           log('error', `${chunkId}: impl "completed" but 0 commits on branch; not checkpointing`);
           stopping = true;
-          break;
+        } else {
+          writeCheckpoint(`${chunkId}:impl_done`);
+          log('info', `${chunkId}: impl ${ANSI.green}${ANSI.bold}PASSED${ANSI.reset} in ${implResult.iterations} iterations (${implCommits} commits)`);
         }
-        writeCheckpoint(`${chunkId}:impl_done`);
-        log('info', `${chunkId}: impl PASSED in ${implResult.iterations} iterations (${implCommits} commits)`);
       } else {
-        log('error', `${chunkId}: impl FAILED after ${implResult.iterations} iterations`);
+        log('error', `${chunkId}: impl ${ANSI.red}${ANSI.bold}FAILED${ANSI.reset} after ${implResult.iterations} iterations`);
         stopping = true;
-        break;
       }
     } else {
       log('info', `${chunkId}: impl already done (checkpoint), skipping`);
       implResult = { completed: true, iterations: 0, output: '', rateLimitHits: 0 };
     }
 
-    if (stopping) {
-      TraceContext.endSpan(chunkSpan, { status: 'error', errorMessage: 'impl failed' });
-      await sqliteAdapter.flush(trace);
-      break;
-    }
-
-    // Hardening loop
+    // Hardening loop (skip if impl failed or already stopping)
     let hardenResult: RalphLoopResult & { rateLimitHits: number } = { completed: false, iterations: 0, output: '', rateLimitHits: 0 };
-    if (implResult.completed && !checkpoint.has(`${chunkId}:harden_done`)) {
+    if (!stopping && implResult.completed && !checkpoint.has(`${chunkId}:harden_done`)) {
       log('info', `${chunkId}: starting harden loop (max ${args.maxIterations} iters)`);
-      const hardenPrompt = `Review work on branch '${branch}' for chunk '${chunkPath}'. Read the chunk file first. Check ALL success criteria checkboxes and hardening requirements. Fix any issues found. Add missing tests. Commit fixes. Run the full test suite: cd franken-orchestrator && npx vitest run && npx tsc --noEmit. Output <promise>HARDEN_${chunkId}_DONE</promise> when everything is stable and all criteria are met.`;
+      const hardenPrompt = `You are hardening chunk '${chunkPath}' on branch '${branch}'. Do NOT invoke any skills or do code reviews. Follow these steps exactly:
+
+1. Read '${chunkPath}' to get the success criteria and verification command
+2. Run the verification command from the chunk file (usually: cd franken-orchestrator && npx vitest run && npx tsc --noEmit)
+3. If tests fail or typecheck errors exist, fix them and commit
+4. Check each success criterion from the chunk file — fix and commit anything missing
+5. Check each hardening requirement — fix and commit anything missing
+6. When ALL criteria pass and verification succeeds, output <promise>HARDEN_${chunkId}_DONE</promise>`;
 
       hardenResult = await runRalphLoop(
-        hardenPrompt, `HARDEN_${chunkId}_DONE`, args.maxIterations, 10,
+        hardenPrompt, `HARDEN_${chunkId}_DONE`, args.maxIterations, 25,
         trace, chunkSpan, 'harden', chunkId,
         args.provider, args.claudeCmd, args.codexCmd, args.codexArgs,
         counter, costCalc, breaker, loopDetector,
@@ -828,28 +950,23 @@ async function main() {
       chunkRateLimitHits += hardenResult.rateLimitHits;
 
       if (hardenResult.completed) {
+        // Safety: auto-commit any dirty files left by provider
+        autoCommitIfDirty(chunkId, 'harden-final', hardenResult.iterations);
         const hardenCommits = parseInt(git(`rev-list --count ${BASE_BRANCH}..HEAD`), 10) || 0;
         if (hardenCommits === 0) {
           log('error', `${chunkId}: harden "completed" but 0 commits on branch; not checkpointing`);
           stopping = true;
-          break;
+        } else {
+          writeCheckpoint(`${chunkId}:harden_done`);
+          log('info', `${chunkId}: harden ${ANSI.green}${ANSI.bold}PASSED${ANSI.reset} in ${hardenResult.iterations} iterations`);
         }
-        writeCheckpoint(`${chunkId}:harden_done`);
-        log('info', `${chunkId}: harden PASSED in ${hardenResult.iterations} iterations`);
       } else {
         log('warn', `${chunkId}: harden didn't complete promise; not marking harden_done`);
         stopping = true;
-        break;
       }
     } else if (checkpoint.has(`${chunkId}:harden_done`)) {
       log('info', `${chunkId}: harden already done (checkpoint), skipping`);
       hardenResult = { completed: true, iterations: 0, output: '', rateLimitHits: 0 };
-    }
-
-    if (stopping) {
-      TraceContext.endSpan(chunkSpan, { status: 'error', errorMessage: 'harden failed' });
-      await sqliteAdapter.flush(trace);
-      break;
     }
 
     // Merge back
@@ -862,7 +979,7 @@ async function main() {
         git(`merge ${branch} --no-edit`);
         writeCheckpoint(`${chunkId}:merged`);
         merged = true;
-        log('info', `${chunkId}: merged to ${BASE_BRANCH}`);
+        log('info', `${chunkId}: ${ANSI.green}merged${ANSI.reset} to ${ANSI.bold}${BASE_BRANCH}${ANSI.reset}`);
       } catch (err) {
         log('error', `${chunkId}: merge conflict — ${err}`);
         try { git('merge --abort'); } catch {}
@@ -908,10 +1025,9 @@ async function main() {
 
     const totalIters = implResult.iterations + hardenResult.iterations;
     const durationStr = (chunkDurationMs / 1000).toFixed(0);
-    const status = merged ? 'PASS' : 'FAIL';
     totalRateLimitHits += chunkRateLimitHits;
 
-    log('info', `${chunkId}: ${status} — ${totalIters} iters, ~${chunkTokens.totalTokens} tokens, $${chunkCost.toFixed(2)}, ${durationStr}s`);
+    log('info', `${chunkId}: ${statusBadge(merged)} ${totalIters} iters | ~${chunkTokens.totalTokens} tokens | $${chunkCost.toFixed(2)} | ${durationStr}s`);
 
     results.push({
       chunkId,
@@ -923,6 +1039,8 @@ async function main() {
       durationMs: chunkDurationMs,
       rateLimitHits: chunkRateLimitHits,
     });
+
+    if (stopping) break;
   }
 
   // ── Final Summary ──
@@ -937,35 +1055,55 @@ async function main() {
   });
   const totalCost = costCalc.totalCost(finalCostEntries);
 
-  log('info', '\n' + '='.repeat(60));
-  log('info', 'BUILD SUMMARY');
-  log('info', '='.repeat(60));
-  log('info', '');
-  log('info', `Duration: ${(totalDurationMs / 1000 / 60).toFixed(1)} minutes`);
-  log('info', `Total tokens: ~${grandTotals.totalTokens} (prompt: ~${grandTotals.promptTokens}, completion: ~${grandTotals.completionTokens})`);
-  log('info', `Total cost: $${totalCost.toFixed(2)} / $${args.budget}`);
-  log('info', `Rate limit hits: ${totalRateLimitHits}`);
-  log('info', '');
+  logHeader('BUILD SUMMARY');
+
+  const mins = (totalDurationMs / 1000 / 60).toFixed(1);
+  console.log(`  ${ANSI.dim}Duration:${ANSI.reset}     ${mins} minutes`);
+  console.log(`  ${ANSI.dim}Tokens:${ANSI.reset}       ~${grandTotals.totalTokens} ${ANSI.dim}(prompt: ~${grandTotals.promptTokens}, completion: ~${grandTotals.completionTokens})${ANSI.reset}`);
+  console.log(`  ${ANSI.dim}Budget:${ANSI.reset}       ${budgetBar(totalCost, args.budget)}`);
+  if (totalRateLimitHits > 0) {
+    console.log(`  ${ANSI.dim}Rate limits:${ANSI.reset}  ${ANSI.yellow}${totalRateLimitHits}${ANSI.reset}`);
+  }
+  console.log('');
 
   // Per-model breakdown
-  for (const model of counter.allModels()) {
-    const t = counter.totalsFor(model);
-    const c = costCalc.totalCost([{ model, promptTokens: t.promptTokens, completionTokens: t.completionTokens }]);
-    log('info', `  ${model}: ~${t.totalTokens} tokens, $${c.toFixed(2)}`);
+  if (counter.allModels().length > 0) {
+    console.log(`  ${ANSI.dim}Models:${ANSI.reset}`);
+    for (const model of counter.allModels()) {
+      const t = counter.totalsFor(model);
+      const c = costCalc.totalCost([{ model, promptTokens: t.promptTokens, completionTokens: t.completionTokens }]);
+      console.log(`    ${ANSI.bold}${model}${ANSI.reset}: ~${t.totalTokens} tokens, $${c.toFixed(2)}`);
+    }
+    console.log('');
   }
 
-  log('info', '');
-  log('info', 'Per-chunk results:');
-  for (const r of results) {
-    const status = r.merged ? 'PASS' : 'FAIL';
-    const iters = r.implResult.iterations + r.hardenResult.iterations;
-    log('info', `  ${r.chunkId}: ${status} | ${iters} iters | $${r.cost.toFixed(2)} | ${(r.durationMs / 1000).toFixed(0)}s`);
+  // Per-chunk results
+  if (results.length > 0) {
+    console.log(`  ${ANSI.dim}Chunks:${ANSI.reset}`);
+    for (const r of results) {
+      const iters = r.implResult.iterations + r.hardenResult.iterations;
+      console.log(`    ${statusBadge(r.merged)} ${ANSI.bold}${r.chunkId}${ANSI.reset} ${ANSI.dim}|${ANSI.reset} ${iters} iters ${ANSI.dim}|${ANSI.reset} $${r.cost.toFixed(2)} ${ANSI.dim}|${ANSI.reset} ${(r.durationMs / 1000).toFixed(0)}s`);
+    }
+    console.log('');
   }
 
-  log('info', '');
   const passed = results.filter(r => r.merged).length;
   const failed = results.filter(r => !r.merged).length;
-  log('info', `Result: ${passed} passed, ${failed} failed out of ${results.length} chunks`);
+  const resultColor = failed === 0 ? ANSI.green : ANSI.red;
+  console.log(`  ${resultColor}${ANSI.bold}Result: ${passed} passed, ${failed} failed${ANSI.reset} out of ${results.length} chunks\n`);
+
+  // Write plain summary to log file
+  try {
+    const summaryPlain = [
+      `Duration: ${mins} minutes`,
+      `Tokens: ~${grandTotals.totalTokens} (prompt: ~${grandTotals.promptTokens}, completion: ~${grandTotals.completionTokens})`,
+      `Cost: $${totalCost.toFixed(2)} / $${args.budget}`,
+      `Rate limit hits: ${totalRateLimitHits}`,
+      ...results.map(r => `  ${r.chunkId}: ${r.merged ? 'PASS' : 'FAIL'} | ${r.implResult.iterations + r.hardenResult.iterations} iters | $${r.cost.toFixed(2)} | ${(r.durationMs / 1000).toFixed(0)}s`),
+      `Result: ${passed} passed, ${failed} failed out of ${results.length} chunks`,
+    ].join('\n');
+    appendFileSync(LOG_FILE, summaryPlain + '\n');
+  } catch {}
 
   // Cleanup
   if (server) await server.stop();
