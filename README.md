@@ -12,9 +12,9 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Architecture
 
-Frankenbeast is composed of 8 independent modules, each in its own directory with independent versioning, tests, and build pipelines. They communicate through typed port/adapter interfaces — no module directly imports another.
+Frankenbeast is composed of 10 modules, each in its own repository with independent versioning, tests, and build pipelines. They communicate through typed port/adapter interfaces — no module directly imports another.
 
-See [ARCHITECTURE.md](ARCHITECTURE.md) for the full interconnection diagram.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
 ```
 User Input
@@ -37,16 +37,18 @@ User Input
 
 ## Modules
 
-| # | Module | Package | Role |
-|---|--------|---------|------|
-| 01 | [frankenfirewall](frankenfirewall/) | `@franken/firewall` | Model-agnostic proxy — PII masking, injection scanning, schema enforcement. Claude + OpenAI adapters included. |
-| 02 | [franken-skills](franken-skills/) | `@franken/skills` | Skill registry — discovery, validation, and loading of tool definitions. |
-| 03 | [franken-brain](franken-brain/) | `franken-brain` | Three-tier memory — working (in-process), episodic (SQLite), semantic (ChromaDB). |
-| 04 | [franken-planner](franken-planner/) | `franken-planner` | Intent → DAG task graphs. Linear, Parallel, and Recursive planning strategies. |
-| 05 | [franken-observer](franken-observer/) | `@frankenbeast/observer` | Flight data recorder — tracing, cost tracking, evals, export to OTEL/Langfuse/Prometheus/Tempo. |
-| 06 | [franken-critique](franken-critique/) | `@franken/critique` | Plan validation — 8 evaluators (deterministic first), circuit breakers, lesson recorder. |
-| 07 | [franken-governor](franken-governor/) | `@franken/governor` | Human-in-the-loop — trigger evaluators, approval channels (CLI/Slack), HMAC-signed approvals. |
-| 08 | [franken-heartbeat](franken-heartbeat/) | `franken-heartbeat` | Proactive reflection — scheduled pulse checks, self-improvement task injection. |
+| # | Module | Role |
+|---|--------|------|
+| 01 | [frankenfirewall](https://github.com/djm204/franken-firewall) | Model-agnostic proxy — PII masking, injection scanning, schema enforcement. Claude, OpenAI, and Ollama adapters. |
+| 02 | [franken-skills](https://github.com/djm204/franken-skills) | Skill registry — discovery, validation, and loading of tool definitions. |
+| 03 | [franken-brain](https://github.com/djm204/franken-brain) | Three-tier memory — working (in-process), episodic (SQLite), semantic (ChromaDB). |
+| 04 | [franken-planner](https://github.com/djm204/franken-planner) | Intent → DAG task graphs. Linear, Parallel, and Recursive planning strategies. |
+| 05 | [franken-observer](https://github.com/djm204/franken-observer) | Flight data recorder — tracing, cost tracking, evals, export to OTEL/Langfuse/Prometheus/Tempo. |
+| 06 | [franken-critique](https://github.com/djm204/franken-critique) | Plan validation — 8 evaluators (deterministic first), circuit breakers, lesson recorder. |
+| 07 | [franken-governor](https://github.com/djm204/franken-governor) | Human-in-the-loop — trigger evaluators, approval channels (CLI/Slack), HMAC-signed approvals. |
+| 08 | [franken-heartbeat](https://github.com/djm204/franken-heartbeat) | Proactive reflection — scheduled pulse checks, self-improvement task injection. |
+| — | [franken-types](https://github.com/djm204/franken-types) | Shared type definitions — TaskId, Severity, Result, RationaleBlock, TokenSpend. |
+| — | [franken-orchestrator](https://github.com/djm204/franken-orchestrator) | The Beast Loop — wires all modules into a 4-phase agent pipeline with circuit breakers. |
 
 ### Core Principles
 
@@ -55,6 +57,16 @@ User Input
 - **Immutable safety constraints.** Guardrails live in the firewall pipeline, not in the LLM prompt. They cannot be compressed or forgotten.
 - **Human-in-the-loop as a first-class primitive.** High-stakes actions require cryptographically signed human approval.
 - **Full auditability.** Every decision is traced, costed, and exportable.
+
+## HTTP Services
+
+Three modules expose standalone Hono HTTP servers for use as independent microservices:
+
+| Service | Endpoints |
+|---------|-----------|
+| Firewall | `POST /v1/chat/completions`, `POST /v1/messages`, `GET /health` |
+| Critique | `POST /v1/review`, `GET /health` |
+| Governor | `POST /v1/approval/request`, `POST /v1/approval/respond`, `POST /v1/webhook/slack`, `GET /health` |
 
 ## Prerequisites
 
@@ -65,6 +77,7 @@ User Input
 
 - **ChromaDB** — required for semantic memory (MOD-03). Not needed for unit/integration tests.
 - **LLM API key** — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for runtime use. Not needed for tests (mocked).
+- **Docker** — for running the local dev stack (ChromaDB, Grafana, Tempo).
 
 ## Quick Start
 
@@ -73,7 +86,7 @@ User Input
 git clone <repo-url> frankenbeast
 cd frankenbeast
 
-# Install all dependencies (npm workspaces)
+# Install all dependencies
 npm install
 
 # Build all modules
@@ -86,38 +99,36 @@ npm test
 npm run test:all
 ```
 
+See [docs/guides/quickstart.md](docs/guides/quickstart.md) for the full setup guide including Docker services.
+
 ## Running Tests
 
-### Root-level integration tests
-
 ```bash
-# Run all integration tests
+# Root-level integration tests
 npm test
 
-# Watch mode
-npm run test:watch
+# All tests across the entire project (1,572 tests)
+npm run test:all
 
-# With coverage
-npm run test:coverage
-```
-
-### Per-module tests
-
-```bash
-# Run a single module's tests
+# Per-module tests
 cd franken-brain && npm test
 
-# Run with coverage
-cd franken-critique && npm run test:coverage
-
-# Run integration tests (where available)
-cd franken-governor && npm run test:integration
+# Orchestrator E2E tests
+cd franken-orchestrator && npm run test:e2e
 ```
 
-### All tests across the entire project
+## Local Dev Environment
 
 ```bash
-npm run test:all
+# Start supporting services (ChromaDB, Grafana, Tempo)
+cp .env.example .env
+docker compose up -d
+
+# Seed ChromaDB with initial collections
+npx tsx scripts/seed.ts
+
+# Verify everything is running
+npx tsx scripts/verify-setup.ts
 ```
 
 ## Configuration
@@ -132,38 +143,28 @@ npm run test:all
 | `CHROMA_PORT` | MOD-03 | If using semantic memory | ChromaDB server port (default: `8000`) |
 | `SLACK_WEBHOOK_URL` | MOD-07 | If using Slack approvals | Slack webhook for HITL notifications |
 
+See [.env.example](.env.example) for the full list.
+
 ### Module Configuration
 
-All modules use **dependency injection** — configuration is passed via constructor arguments, not globals or environment variables. This enables full testability with mock implementations.
+All modules use **dependency injection** — configuration is passed via constructor arguments, not globals or environment variables.
 
 ```typescript
-// MOD-06: Critique — via factory function
-const reviewer = createReviewer({
-  guardrails: guardrailsPort,
-  memory: memoryPort,
-  observability: observabilityPort,
-  knownPackages: ['express', 'zod'],
-});
+// Orchestrator — via config file or CLI flags
+npx frankenbeast --project-id my-project --config frankenbeast.config.json --dry-run
 
-// MOD-07: Governor — via factory function
-const governor = createGovernor({
-  channel: new CliChannel(),
-  triggers: [new BudgetTrigger({ limit: 1.0 }), new SkillTrigger()],
-  projectId: 'my-project',
-});
+// Firewall — standalone service
+import { createFirewallApp } from 'frankenfirewall/server';
+const app = createFirewallApp({ port: 9090 });
 
-// MOD-03: Brain — via constructor
-const memory = new MemoryOrchestrator({
-  episodic: new EpisodicMemoryStore(sqliteDb),
-  semantic: new SemanticMemoryStore(chromaClient, embeddings),
-  strategy: new TruncationStrategy(),
-  llm: llmClient,
-});
+// Critique — standalone service
+import { createCritiqueApp } from 'franken-critique/server';
+const app = createCritiqueApp({ pipeline, bearerToken: 'secret' });
 ```
 
 ## The Beast Loop
 
-The orchestrator manages execution through four phases. It is non-linear — it loops back to earlier phases if a module signals a failure.
+The orchestrator manages execution through four phases with circuit breakers at each stage.
 
 ### Phase 1: Ingestion & Hydration
 
@@ -193,69 +194,60 @@ The trace is closed, token spend summarised, and the Heartbeat pulse fires to ch
 
 | Trigger | Action |
 |---------|--------|
-| Injection detected (MOD-01) | Immediate process kill |
-| Budget exceeded (MOD-05) | Break loop, escalate to HITL |
+| Injection detected (MOD-01) | Immediate halt |
+| Budget exceeded (MOD-05) | Escalate to HITL |
 | Critique fails 3x (MOD-06) | Escalate to human |
+
+### Resilience
+
+- **Context serialization** — BeastContext snapshots saved to disk for crash recovery
+- **Graceful shutdown** — SIGTERM/SIGINT handlers save state before exit
+- **Module health checks** — all 8 modules probed on startup
 
 ## Adding a New LLM Provider
 
-Frankenbeast is LLM-agnostic. The firewall (MOD-01) already includes Claude and OpenAI adapters. To add a new provider:
+Frankenbeast is LLM-agnostic. The firewall includes Claude, OpenAI, and Ollama adapters. To add a new provider:
 
-1. **Implement `IAdapter`** in `frankenfirewall/src/adapters/`:
+1. **Implement `IAdapter`** — see [docs/guides/add-llm-provider.md](docs/guides/add-llm-provider.md)
+2. **Run conformance tests** — `runAdapterConformance(factory, fixtures)` validates all 4 `IAdapter` methods
+3. **Register** the adapter in `AdapterRegistry`
 
-```typescript
-import { BaseAdapter } from '../base-adapter.js';
-import type { UnifiedRequest, UnifiedResponse } from '../../types/index.js';
+## Wrapping External Agents
 
-export class GeminiAdapter extends BaseAdapter {
-  readonly providerId = 'gemini';
-
-  async transformRequest(request: UnifiedRequest): Promise<unknown> {
-    // Map UnifiedRequest → Gemini API format
-  }
-
-  async execute(providerRequest: unknown): Promise<unknown> {
-    // Call Gemini API
-  }
-
-  async transformResponse(providerResponse: unknown): Promise<UnifiedResponse> {
-    // Map Gemini response → UnifiedResponse
-  }
-}
-```
-
-2. **Register** the adapter in `AdapterRegistry`
-3. **Run conformance tests** to verify the adapter satisfies the `IAdapter` contract
-
-## Guardrails as a Service
-
-The firewall and critique modules are designed to wrap *any* agent framework as a standalone governance layer. Point your agent's LLM calls through the Frankenbeast firewall proxy:
+The firewall can wrap *any* agent framework as a standalone governance layer:
 
 ```
 Your Agent → Frankenbeast Firewall Proxy → LLM Provider
 ```
 
-This is the deployment model for wrapping external agents (e.g., OpenClaw, custom agents). Safety constraints live in the proxy pipeline, not in the agent's prompt — so they survive context-window compression.
-
-See the [Implementation Plan](IMPLEMENTATION_PLAN.md) Phase 5 for the full roadmap.
+Safety constraints live in the proxy pipeline, not in the agent's prompt — so they survive context-window compression. See [docs/guides/wrap-external-agent.md](docs/guides/wrap-external-agent.md) and the [OpenClaw integration example](examples/openclaw-integration/).
 
 ## Project Status
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Stabilise Individual Modules | Complete |
-| 2 | LLM-Agnostic Adapter Layer | Planned |
-| 3 | Inter-Module Contracts | Planned |
-| 4 | The Orchestrator ("Beast Loop") | Planned |
-| 5 | Guardrails as a Service | Planned |
-| 6 | End-to-End Testing & Hardening | Planned |
-| 7 | CLI & Developer Experience | Planned |
+| 1 | Individual Module Implementation | Complete (971+ tests) |
+| 2 | LLM-Agnostic Adapter Layer | Complete (PRs 15-18) |
+| 3 | Inter-Module Contracts & Shared Types | Complete (PRs 19-24) |
+| 4 | The Orchestrator ("Beast Loop") | Complete (PRs 25-30) |
+| 5 | Guardrails as a Service (HTTP) | Complete (PRs 31-35) |
+| 6 | End-to-End Testing & Hardening | Complete (PRs 36-39) |
+| 7 | CLI & Developer Experience | Complete (PRs 40-42) |
+
+**1,572 tests across 177 test files, all passing.**
+
+See [docs/PROGRESS.md](docs/PROGRESS.md) for the full PR-by-PR breakdown.
+
+### Known Limitations
+
+- **Orchestrator execution is stub-level** — `executeTask()` records success without invoking a real skill. Requires concrete skill implementations to wire.
+- **CLI requires `--dry-run`** — no concrete module implementations wired for live execution yet.
 
 ## Development
 
 ### Working on a module
 
-Each module is self-contained. Work within its directory:
+Each module is its own git repository:
 
 ```bash
 cd franken-brain
@@ -278,23 +270,42 @@ All modules follow the same patterns:
 
 ```
 frankenbeast/
-├── ARCHITECTURE.md          # Module interconnection diagram (Mermaid)
-├── IMPLEMENTATION_PLAN.md   # Development roadmap (7 phases, 42 PRs)
-├── README.md                # This file
-├── package.json             # npm workspaces root
-├── vitest.config.ts         # Root integration test config
-├── tests/                   # Root-level integration tests
-│   ├── helpers/             # Shared stubs and test factories
-│   └── integration/         # Cross-module integration tests
-├── franken-brain/           # MOD-03: Memory Systems
-├── franken-critique/        # MOD-06: Self-Critique & Reflection
-├── franken-governor/        # MOD-07: HITL & Governance
-├── franken-heartbeat/       # MOD-08: Proactive Reflection
-├── franken-observer/        # MOD-05: Observability
-├── franken-planner/         # MOD-04: Planning & Decomposition
-├── franken-skills/          # MOD-02: Skill Registry
-└── frankenfirewall/         # MOD-01: Firewall/Guardrails
+├── README.md                    # This file
+├── package.json                 # Root build/test scripts
+├── docker-compose.yml           # Local dev stack (ChromaDB, Grafana, Tempo)
+├── frankenbeast.config.example.json
+├── docs/
+│   ├── ARCHITECTURE.md          # Module interconnection diagram (Mermaid)
+│   ├── PROGRESS.md              # PR-by-PR implementation tracker
+│   ├── CONTRACT_MATRIX.md       # Port interface compatibility matrix
+│   ├── adr/                     # Architecture Decision Records (6)
+│   ├── guides/                  # Quickstart, add-provider, wrap-agent
+│   └── plain-language-overview.md
+├── tests/                       # Root-level integration tests
+│   ├── helpers/                 # Shared stubs and test factories
+│   └── integration/             # Cross-module integration tests
+├── scripts/                     # seed.ts, verify-setup.ts
+├── examples/                    # OpenClaw integration example
+├── frankenfirewall/             # MOD-01: Firewall/Guardrails
+├── franken-skills/              # MOD-02: Skill Registry
+├── franken-brain/               # MOD-03: Memory Systems
+├── franken-planner/             # MOD-04: Planning & Decomposition
+├── franken-observer/            # MOD-05: Observability
+├── franken-critique/            # MOD-06: Self-Critique & Reflection
+├── franken-governor/            # MOD-07: HITL & Governance
+├── franken-heartbeat/           # MOD-08: Proactive Reflection
+├── franken-types/               # Shared type definitions
+└── franken-orchestrator/        # The Beast Loop
 ```
+
+## Documentation
+
+- [Architecture](docs/ARCHITECTURE.md) — system overview with Mermaid diagrams
+- [Quickstart Guide](docs/guides/quickstart.md) — get running in 7 steps
+- [Add an LLM Provider](docs/guides/add-llm-provider.md) — implement `IAdapter` in 4 steps
+- [Wrap an External Agent](docs/guides/wrap-external-agent.md) — firewall-as-proxy or full orchestration
+- [Contract Matrix](docs/CONTRACT_MATRIX.md) — all port interfaces documented
+- [ADRs](docs/adr/) — architectural decisions and rationale
 
 ## License
 

@@ -66,7 +66,7 @@ Canonical type definitions shared across all modules:
         subgraph "MOD-01: Frankenfirewall"
             direction TB
             FW_IN["Inbound Interceptors<br/>• Injection Scanner<br/>• PII Masker<br/>• Project Alignment"]
-            FW_ADAPT["Adapter Pipeline<br/>• ClaudeAdapter<br/>• OpenAIAdapter<br/>• (Extensible)"]
+            FW_ADAPT["Adapter Pipeline<br/>• ClaudeAdapter<br/>• OpenAIAdapter<br/>• OllamaAdapter<br/>• (Extensible)"]
             FW_OUT["Outbound Interceptors<br/>• Schema Enforcer<br/>• Deterministic Grounder<br/>• Hallucination Scraper"]
             FW_IN --> FW_ADAPT --> FW_OUT
         end
@@ -156,10 +156,33 @@ Canonical type definitions shared across all modules:
             HB_DET --> HB_REFL --> HB_DISP --> HB_BRIEF
         end
 
-        LLM[(LLM Providers<br/>Claude / OpenAI / ...)]
+        LLM[(LLM Providers<br/>Claude / OpenAI / Ollama / ...)]
+
+        subgraph "Orchestrator: The Beast Loop"
+            direction LR
+            BL_INGEST["Phase 1<br/>Ingestion"]
+            BL_PLAN["Phase 2<br/>Planning"]
+            BL_EXEC["Phase 3<br/>Execution"]
+            BL_CLOSE["Phase 4<br/>Closure"]
+            BL_BREAK["Circuit Breakers<br/>• Injection<br/>• Budget<br/>• Critique Spiral"]
+            BL_INGEST --> BL_PLAN --> BL_EXEC --> BL_CLOSE
+            BL_BREAK -.-> BL_INGEST
+            BL_BREAK -.-> BL_PLAN
+            BL_BREAK -.-> BL_EXEC
+        end
+
+        %% === Orchestrator wiring ===
+        BL_INGEST -- "sanitize" --> FW_IN
+        BL_INGEST -- "hydrate" --> MEM_ORCH
+        BL_PLAN -- "plan" --> PL_INTENT
+        BL_PLAN -- "critique" --> CR_LOOP
+        BL_EXEC -- "resolve" --> SK_REG
+        BL_EXEC -- "approve" --> GOV_GW
+        BL_CLOSE -- "trace" --> OB_TRACE
+        BL_CLOSE -- "pulse" --> HB_DET
 
         %% === USER FLOW ===
-        User --> FW_IN
+        User --> BL_INGEST
         FW_ADAPT --> LLM
         LLM --> FW_ADAPT
 
@@ -225,7 +248,7 @@ Canonical type definitions shared across all modules:
         %% === Output back to user ===
         GOV_GW -- "approval<br/>requests" --> User
         HB_BRIEF -- "morning<br/>brief" --> User
-        PL_EXEC -- "final<br/>result" --> User
+        BL_CLOSE -- "final<br/>result" --> User
 
         %% === STYLING ===
         classDef firewall fill:#ff6b6b,stroke:#c0392b,color:#fff
@@ -236,8 +259,10 @@ Canonical type definitions shared across all modules:
         classDef critique fill:#f368e0,stroke:#c44569,color:#fff
         classDef governor fill:#feca57,stroke:#f6b93b,color:#333
         classDef heartbeat fill:#48dbfb,stroke:#0abde3,color:#333
+        classDef orchestrator fill:#2d3436,stroke:#636e72,color:#fff
         classDef external fill:#dfe6e9,stroke:#636e72,color:#333
 
+        class BL_INGEST,BL_PLAN,BL_EXEC,BL_CLOSE,BL_BREAK orchestrator
         class FW_IN,FW_ADAPT,FW_OUT firewall
         class SK_REG,SK_DISC,SK_VAL skills
         class MEM_WORK,MEM_EPIS,MEM_SEM,MEM_ORCH,MEM_PII brain
@@ -247,4 +272,41 @@ Canonical type definitions shared across all modules:
         class GOV_TRIG,GOV_GW,GOV_CHAN,GOV_SEC,GOV_AUDIT governor
         class HB_DET,HB_REFL,HB_DISP,HB_BRIEF heartbeat
         class User,LLM external
+```
+
+## Port Interfaces (Hexagonal Architecture)
+
+All inter-module communication uses typed port interfaces defined in each module. The orchestrator depends on port abstractions, never on concrete implementations. See [CONTRACT_MATRIX.md](CONTRACT_MATRIX.md) for the full compatibility matrix.
+
+| Port | Defined In | Consumed By |
+|------|-----------|-------------|
+| `IAdapter` | frankenfirewall | Orchestrator (ingestion) |
+| `ISkillRegistry` | franken-skills | Planner, Orchestrator (execution) |
+| `IMemoryOrchestrator` | franken-brain | Planner, Orchestrator (hydration) |
+| `GuardrailsPort` | franken-critique | Critique evaluators |
+| `MemoryPort` | franken-critique | Critique evaluators |
+| `ObservabilityPort` | franken-critique | Critique circuit breakers |
+| `EscalationPort` | franken-critique | Critique loop |
+| `ApprovalChannel` | franken-governor | Orchestrator (execution) |
+| `TriggerEvaluator` | franken-governor | Governor gateway |
+| `ILlmClient` | @franken/types | Brain, Heartbeat |
+
+## Deployment Modes
+
+```
+┌─────────────────────────────────────────────────────┐
+│  Mode 1: Full Orchestration                         │
+│  CLI → BeastLoop → all 8 modules → BeastResult      │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Mode 2: Firewall-as-Proxy                          │
+│  External Agent → Firewall HTTP → LLM Provider      │
+│  (standalone safety layer, no orchestrator needed)   │
+└─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Mode 3: Critique-as-a-Service                      │
+│  Any client → POST /v1/review → evaluation results  │
+└─────────────────────────────────────────────────────┘
 ```
