@@ -29,7 +29,7 @@ Each of the 10 modules is its own git repository with independent versioning, CI
 | # | Module | Tests | Status |
 |---|--------|-------|--------|
 | 01 | frankenfirewall | 163 | Complete — Claude, OpenAI, Ollama adapters; conformance suite; Hono server; Docker |
-| 02 | franken-skills | 75 | Complete |
+| 02 | franken-skills | 75 | Complete — skill registry, discovery service, Zod validation |
 | 03 | franken-brain | 166 | Complete — working, episodic, semantic memory; PII guards |
 | 04 | franken-planner | 188 | Complete — DAG builder, 3 strategies, CoT gates |
 | 05 | franken-observer | 373 | Complete — tracing, cost tracking, evals, export adapters |
