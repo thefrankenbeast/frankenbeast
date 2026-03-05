@@ -18,11 +18,10 @@ set -euo pipefail
 #   - Rate limit detection & provider fallback
 #
 # Usage:
-#   ./plan-beast-runner/run-build.sh                    # start or resume
-#   ./plan-beast-runner/run-build.sh --reset             # start fresh
-#   ./plan-beast-runner/run-build.sh --budget 5          # $5 budget limit
-#   ./plan-beast-runner/run-build.sh --no-viewer         # skip trace viewer
-#   ./plan-beast-runner/run-build.sh --verbose           # debug-level logs
+#   ./plan-beast-runner/run-build.sh <branch-name> [options]
+#   ./plan-beast-runner/run-build.sh feat/beast-loop     # start or resume
+#   ./plan-beast-runner/run-build.sh feat/beast-loop --reset   # start fresh
+#   ./plan-beast-runner/run-build.sh feat/beast-loop --budget 5
 #
 # Prerequisites:
 #   - claude CLI installed and authenticated (codex optional for fallback)
@@ -33,7 +32,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RUNNER="${REPO_ROOT}/plan-2026-03-05/build-runner.ts"
-BASE_BRANCH="feat/beast-runner"
+
+# First arg is the base branch name (required)
+BASE_BRANCH="${1:-}"
+if [ -z "$BASE_BRANCH" ]; then
+  echo "Usage: $0 <base-branch> [runner-options...]"
+  echo "Example: $0 feat/beast-loop-integration --budget 5 --verbose"
+  exit 1
+fi
+shift
 
 # Ensure base branch exists
 git checkout -b "$BASE_BRANCH" 2>/dev/null || git checkout "$BASE_BRANCH"
