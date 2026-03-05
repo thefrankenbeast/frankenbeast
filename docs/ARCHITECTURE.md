@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Frankenbeast is a deterministic guardrails framework for AI agents, comprising 10 packages:
+Frankenbeast is a deterministic guardrails framework for AI agents, comprising 11 packages:
 
 | Package | Role |
 |---------|------|
@@ -14,6 +14,7 @@ Frankenbeast is a deterministic guardrails framework for AI agents, comprising 1
 | `franken-critique` | MOD-06: Self-critique pipeline with deterministic + heuristic evaluators |
 | `franken-governor` | MOD-07: Human-in-the-loop governance and approval gating |
 | `franken-heartbeat` | MOD-08: Continuous improvement, reflection, and morning briefs |
+| `franken-mcp` | MCP server registry — stdio transport, tool discovery, constraint-aware tool execution |
 | `franken-types` | Shared type definitions (TaskId, Severity, Result, TokenSpend, etc.) |
 | `franken-orchestrator` | The Beast Loop — wires all modules into a 4-phase agent pipeline |
 
@@ -26,11 +27,12 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
                   │                 │                │                │
               Firewall          Planner          Skills          Observer
               Memory            Critique         Governor        Heartbeat
+                                                 MCP Registry
 ```
 
 1. **Ingestion** — Firewall sanitizes input (injection/PII), Memory hydrates project context
 2. **Planning** — Planner creates task DAG, Critique reviews in loop (max N iterations)
-3. **Execution** — Tasks run in topological order with HITL governor gates
+3. **Execution** — Tasks run in topological order with HITL governor gates; MCP Registry provides external tool execution via connected MCP servers
 4. **Closure** — Token accounting, optional heartbeat pulse, result assembly
 
 **Circuit breakers** halt execution on: injection detection (immediate halt), budget exceeded (HITL escalation), critique spiral (HITL escalation).
@@ -156,6 +158,21 @@ Canonical type definitions shared across all modules:
             HB_DET --> HB_REFL --> HB_DISP --> HB_BRIEF
         end
 
+        subgraph "franken-mcp"
+            direction TB
+            MCP_CFG["Config Loader<br/>Zod-validated mcp-servers.json"]
+            MCP_REG["McpRegistry<br/>IMcpRegistry<br/>Tool → Client routing"]
+            MCP_CLI["McpClient (per server)<br/>JSON-RPC 2.0 lifecycle"]
+            MCP_TRANS["StdioTransport<br/>child_process.spawn"]
+            MCP_CONST["Constraint Resolver<br/>Module → Server → Tool"]
+            MCP_CFG --> MCP_REG
+            MCP_REG --> MCP_CLI
+            MCP_CLI --> MCP_TRANS
+            MCP_CONST --> MCP_REG
+        end
+
+        MCP_SERVERS[(MCP Server Processes<br/>VSCode / Filesystem / ...)]
+
         LLM[(LLM Providers<br/>Claude / OpenAI / Ollama / ...)]
 
         subgraph "Orchestrator: The Beast Loop"
@@ -245,6 +262,12 @@ Canonical type definitions shared across all modules:
         CR_LOOP -. "emit spans" .-> OB_TRACE
         GOV_GW -. "emit spans" .-> OB_TRACE
 
+        %% === franken-mcp connections ===
+        MCP_TRANS -- "stdin/stdout<br/>JSON-RPC 2.0" --> MCP_SERVERS
+        BL_EXEC -- "callTool()" --> MCP_REG
+        MCP_REG -- "tool definitions<br/>as skills" --> SK_REG
+        MCP_CONST -- "constraint check<br/>requires_hitl?" --> GOV_TRIG
+
         %% === Output back to user ===
         GOV_GW -- "approval<br/>requests" --> User
         HB_BRIEF -- "morning<br/>brief" --> User
@@ -260,8 +283,10 @@ Canonical type definitions shared across all modules:
         classDef governor fill:#feca57,stroke:#f6b93b,color:#333
         classDef heartbeat fill:#48dbfb,stroke:#0abde3,color:#333
         classDef orchestrator fill:#2d3436,stroke:#636e72,color:#fff
+        classDef mcp fill:#a29bfe,stroke:#6c5ce7,color:#fff
         classDef external fill:#dfe6e9,stroke:#636e72,color:#333
 
+        class MCP_CFG,MCP_REG,MCP_CLI,MCP_TRANS,MCP_CONST mcp
         class BL_INGEST,BL_PLAN,BL_EXEC,BL_CLOSE,BL_BREAK orchestrator
         class FW_IN,FW_ADAPT,FW_OUT firewall
         class SK_REG,SK_DISC,SK_VAL skills
@@ -271,7 +296,7 @@ Canonical type definitions shared across all modules:
         class CR_PIPE,CR_DET,CR_HEUR,CR_BREAK,CR_LOOP,CR_LESSON critique
         class GOV_TRIG,GOV_GW,GOV_CHAN,GOV_SEC,GOV_AUDIT governor
         class HB_DET,HB_REFL,HB_DISP,HB_BRIEF heartbeat
-        class User,LLM external
+        class User,LLM,MCP_SERVERS external
 ```
 
 ## Port Interfaces (Hexagonal Architecture)
@@ -290,13 +315,15 @@ All inter-module communication uses typed port interfaces defined in each module
 | `ApprovalChannel` | franken-governor | Orchestrator (execution) |
 | `TriggerEvaluator` | franken-governor | Governor gateway |
 | `ILlmClient` | @franken/types | Brain, Heartbeat |
+| `IMcpRegistry` | franken-mcp | Orchestrator (execution), Skills |
+| `IMcpTransport` | franken-mcp | McpClient (internal) |
 
 ## Deployment Modes
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │  Mode 1: Full Orchestration                         │
-│  CLI → BeastLoop → all 8 modules → BeastResult      │
+│  CLI → BeastLoop → all modules + MCP → BeastResult  │
 └─────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────┐
@@ -309,4 +336,87 @@ All inter-module communication uses typed port interfaces defined in each module
 │  Mode 3: Critique-as-a-Service                      │
 │  Any client → POST /v1/review → evaluation results  │
 └─────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────┐
+│  Mode 4: MCP Tool Bridge                            │
+│  Orchestrator → McpRegistry → MCP Servers (stdio)   │
+│  (constraint-aware external tool execution)         │
+└─────────────────────────────────────────────────────┘
 ```
+
+## franken-mcp (MCP Server Registry)
+
+Standalone MCP (Model Context Protocol) client library. Manages persistent connections to MCP servers via stdio transport, discovers their tools, and exposes a constraint-aware interface for calling them.
+
+MCP servers are **not** skills — they are the execution substrate that skills and workflows leverage for deterministic interaction with the environment (VSCode, filesystem, databases, etc.).
+
+### Architecture
+
+```
+Config (mcp-servers.json)
+    │
+    ▼
+┌──────────────────────────────────────────┐
+│  McpRegistry (IMcpRegistry)              │
+│  ┌─────────────┐  ┌─────────────┐       │
+│  │  McpClient   │  │  McpClient   │ ...  │
+│  │  (server A)  │  │  (server B)  │      │
+│  └──────┬───────┘  └──────┬───────┘      │
+│         │                 │              │
+│  ┌──────┴───────┐  ┌──────┴───────┐      │
+│  │ StdioTransport│  │ StdioTransport│     │
+│  └──────┬───────┘  └──────┬───────┘      │
+└─────────┼─────────────────┼──────────────┘
+          │ stdin/stdout     │ stdin/stdout
+          ▼                  ▼
+    MCP Server A       MCP Server B
+```
+
+### Constraint Resolution
+
+Three-level cascade (most conservative defaults):
+
+1. **Module defaults**: `{ is_destructive: true, requires_hitl: true, sandbox_type: "DOCKER" }`
+2. **Server-level**: Overrides defaults for all tools in that server
+3. **Tool-level**: Highest priority, per-tool overrides via `toolOverrides`
+
+### Key Types
+
+| Type | Purpose |
+|------|---------|
+| `McpToolDefinition` | Tool metadata: name, serverId, description, inputSchema, merged constraints |
+| `McpToolConstraints` | `is_destructive`, `requires_hitl`, `sandbox_type` (DOCKER / WASM / LOCAL) |
+| `McpToolResult` | Content array (text / image / resource_link) + isError flag |
+| `McpServerInfo` | Server id, connection status, tool count, version info |
+| `McpRegistryError` | Error with code: CONFIG_INVALID, TOOL_NOT_FOUND, CALL_FAILED, etc. |
+
+### Resilience
+
+- **Partial startup**: If 3 servers configured and 1 fails, the other 2 still work
+- **Configurable timeouts**: `initTimeoutMs` (default 10s) and `callTimeoutMs` (default 30s) per-server
+- **Graceful shutdown**: SIGTERM → 5s wait → SIGKILL, idempotent
+
+## Examples
+
+The `examples/` directory provides quickstart guides and integration patterns.
+
+### Quickstart Examples
+
+| Example | Provider | Key Pattern |
+|---------|----------|-------------|
+| `quickstart/claude-hello` | Claude (`claude-sonnet-4-6`) | ClaudeAdapter → UnifiedRequest/Response |
+| `quickstart/openai-hello` | OpenAI (`gpt-4o`) | OpenAIAdapter → same unified interface |
+| `quickstart/ollama-hello` | Ollama (`llama3.2`, local) | OllamaAdapter → zero-cost, offline capable |
+| `quickstart/custom-adapter` | Groq (test-only) | Template for building new adapters |
+
+All quickstarts follow the same adapter flow:
+
+```
+Create Adapter → Build UnifiedRequest → transformRequest() → execute() → transformResponse() → UnifiedResponse
+```
+
+### Integration Examples
+
+| Example | Purpose |
+|---------|---------|
+| `openclaw-integration` | Docker Compose: Frankenbeast firewall as proxy for OpenClaw agent framework |
