@@ -31,7 +31,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-RUNNER="${REPO_ROOT}/plan-2026-03-05/build-runner.ts"
+RUNNER="${SCRIPT_DIR}/build-runner.ts"
 
 # First arg is the base branch name (required)
 BASE_BRANCH="${1:-}"
