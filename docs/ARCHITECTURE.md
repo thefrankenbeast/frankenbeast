@@ -94,6 +94,160 @@ sequenceDiagram
 
 **Design reference:** See `docs/plans/2026-03-05-beast-runner-design.md` and [ADR-007](adr/007-cli-skill-execution-type.md).
 
+### Full Pipeline (Approach C)
+
+The orchestrator supports three input modes that all converge to a single execution pipeline, enabling the full path from idea to pull request.
+
+#### Three Input Modes
+
+| Mode | Input | Who Decomposes | GraphBuilder |
+|------|-------|----------------|--------------|
+| `chunks` | Pre-written `.md` chunk files on disk | Human (already done) | `ChunkFileGraphBuilder` |
+| `design-doc` | A single design document | LLM via `LlmGraphBuilder` | `LlmGraphBuilder` |
+| `interview` | Natural language goal/prompt | LLM interviews user, generates design doc, decomposes | `InterviewLoop` → `LlmGraphBuilder` |
+
+All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `RalphLoop` → `GitBranchIsolator` → `CliSkillExecutor`. At the end, `PrCreator` opens a PR targeting `--base-branch` (default: `main`).
+
+#### Data Flow
+
+```mermaid
+flowchart TD
+    subgraph "Input Modes"
+        M1["Mode 1: chunks<br/>chunk files on disk"]
+        M2["Mode 2: design-doc<br/>design-doc.md"]
+        M3["Mode 3: interview<br/>user prompt"]
+    end
+
+    M1 --> CFG["ChunkFileGraphBuilder"]
+    M2 --> LGB["LlmGraphBuilder"]
+    M3 --> IL["InterviewLoop"]
+    IL -->|generates design doc| LGB
+
+    CFG --> PG["PlanGraph<br/>(impl+harden task pairs)"]
+    LGB --> PG
+
+    subgraph "BeastLoop.run()"
+        ING["Phase 1: Ingestion<br/>firewall + memory hydration"]
+        PLN["Phase 2: Planning<br/>GraphBuilder → PlanGraph"]
+        EXE["Phase 3: Execution<br/>CliSkillExecutor per task"]
+        CLO["Phase 4: Closure<br/>traces + PR creation"]
+        ING --> PLN --> EXE --> CLO
+    end
+
+    PG --> PLN
+    EXE -->|per commit| CKP["FileCheckpointStore"]
+    CLO --> PR["gh pr create<br/>(target: --base-branch)"]
+    CLO --> BR["BeastResult"]
+```
+
+#### Sequence Diagram — Full Pipeline
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CLI as Build Runner (thin shell)
+    participant BL as BeastLoop
+    participant GB as GraphBuilder
+    participant FW as Firewall
+    participant MEM as Memory
+    participant EXE as Execution Phase
+    participant CSE as CliSkillExecutor
+    participant GBI as GitBranchIsolator
+    participant RL as RalphLoop
+    participant CKP as FileCheckpointStore
+    participant PRC as PrCreator
+    participant OB as Observer
+
+    User->>CLI: beast run --mode chunks|design-doc|interview
+    CLI->>BL: BeastLoop.run(input)
+
+    rect rgb(230, 240, 255)
+        Note over BL,MEM: Phase 1 — Ingestion
+        BL->>FW: sanitize(userInput)
+        FW-->>BL: sanitizedIntent
+        BL->>MEM: hydrate(projectContext)
+        MEM-->>BL: context (ADRs, known errors)
+    end
+
+    rect rgb(255, 240, 230)
+        Note over BL,GB: Phase 2 — Planning
+        BL->>GB: build(intent)
+        Note right of GB: ChunkFileGraphBuilder reads .md files<br/>LlmGraphBuilder calls ILlmClient<br/>InterviewLoop gathers reqs first
+        GB-->>BL: PlanGraph (impl+harden pairs)
+    end
+
+    rect rgb(230, 255, 230)
+        Note over BL,CKP: Phase 3 — Execution
+        loop Each task in PlanGraph.topoSort()
+            BL->>CKP: has(taskId)?
+            alt Already checkpointed
+                Note over BL: Skip (crash recovery)
+            else Not checkpointed
+                BL->>EXE: executeTask(task)
+                EXE->>CSE: execute(skillInput)
+                CSE->>GBI: isolate(chunkId)
+                GBI-->>CSE: branch created
+                CSE->>RL: run(prompt, promiseTag)
+                RL->>OB: startSpan + recordTokenUsage
+                RL-->>CSE: result
+                CSE->>GBI: merge()
+                CSE-->>EXE: SkillResult
+                EXE->>CKP: write(taskId) + recordCommit()
+            end
+        end
+    end
+
+    rect rgb(255, 230, 255)
+        Note over BL,PRC: Phase 4 — Closure
+        BL->>OB: finalize traces + token accounting
+        BL->>PRC: createPr(beastResult)
+        PRC-->>BL: PR URL
+        BL-->>CLI: BeastResult
+    end
+
+    CLI-->>User: summary + exit code
+```
+
+#### Two-Stage Task Model
+
+Each chunk becomes two linked tasks in the `PlanGraph`:
+
+```
+impl:01_types → harden:01_types → impl:02_ralph → harden:02_ralph → ...
+```
+
+- **`impl:<chunkId>`** — TDD implementation. Depends on previous chunk's harden task.
+- **`harden:<chunkId>`** — Review, test, fix. Depends on its own impl task.
+
+This preserves the build-runner's impl+harden pattern inside the orchestrator's topological execution. The execution phase processes tasks in `PlanGraph.topoSort()` order — no special-casing needed.
+
+#### Approach C Component Table
+
+| Component | Location | Responsibility |
+|-----------|----------|----------------|
+| `FileCheckpointStore` | `franken-orchestrator/src/checkpoint/file-checkpoint-store.ts` | Append-only checkpoint file for crash recovery. Records per-commit and milestone checkpoints. |
+| `ChunkFileGraphBuilder` | `franken-orchestrator/src/planning/chunk-file-graph-builder.ts` | Reads numbered `.md` chunk files from a directory, produces `PlanGraph` with impl+harden task pairs. No LLM needed. |
+| `LlmGraphBuilder` | `franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
+| `InterviewLoop` | `franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
+| `PrCreator` | `franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create` targeting `--base-branch`. Generates title + body from `BeastResult`. Idempotent — skips if PR already exists. |
+| `BeastLogger` | `franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting for CLI output. |
+| `CLI args/config/run` | `franken-orchestrator/src/cli/args.ts`, `config-loader.ts`, `run.ts` | Thin CLI shell (~150 lines): arg parsing, dep construction, `BeastLoop.run()`, summary display. |
+| Execution checkpoint wiring | `franken-orchestrator/src/phases/execution.ts` | Checks `checkpoint.has(taskId)` before each task, writes checkpoint after completion. Handles dirty-file resume. |
+| Planning GraphBuilder wiring | `franken-orchestrator/src/phases/planning.ts` | Uses `GraphBuilder.build()` when available, falls back to `IPlannerModule.createPlan()`. |
+
+#### Crash Recovery
+
+Per-commit checkpoints enable crash recovery. On resume:
+
+| State on Resume | Action |
+|-----------------|--------|
+| Clean, HEAD matches last checkpoint | Continue from next iteration |
+| Clean, no checkpoint for this task | Start task fresh |
+| Dirty files, tests pass | Auto-commit as recovery commit, continue |
+| Dirty files, tests fail | Reset to last checkpoint commit |
+
+**Design reference:** See [Approach C Full Pipeline Design](plans/2026-03-05-approach-c-full-pipeline-design.md) and [ADR-008](adr/008-approach-c-full-pipeline.md).
+
 ## HTTP Services (Hono)
 
 Three modules expose HTTP servers:
