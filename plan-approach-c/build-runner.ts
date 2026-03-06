@@ -722,6 +722,13 @@ async function main() {
   DB_FILE = resolve(BUILD_DIR, 'build-traces.db');
   BASE_BRANCH = args.baseBranch;
 
+  // Ensure base branch exists — create from current HEAD if missing
+  try {
+    execSync(`git rev-parse --verify ${BASE_BRANCH}`, { stdio: 'pipe' });
+  } catch {
+    execSync(`git branch ${BASE_BRANCH}`, { stdio: 'pipe' });
+  }
+
   mkdirSync(BUILD_DIR, { recursive: true });
 
   if (args.reset) {

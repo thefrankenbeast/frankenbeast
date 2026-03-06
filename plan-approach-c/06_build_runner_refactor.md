@@ -39,12 +39,39 @@ The new build-runner does only:
    - `prCreator` — real `PrCreator` (unless `--no-pr`)
    - `graphBuilder` — selected `GraphBuilder` implementation
 4. Call `BeastLoop.run({ projectId, userInput: intent })`
-5. Display summary from `BeastResult` (ANSI formatting, budget bar, per-chunk table)
-6. Exit with appropriate code
+5. Display ASCII Frankenstein banner on startup (see Banner section below)
+6. Display summary from `BeastResult` (ANSI formatting, budget bar, per-chunk table)
+7. Exit with appropriate code
+
+## Banner
+
+On startup, before any log output, display an ASCII art Frankenstein monster with the title "FRANKENBEAST". Use green ANSI coloring (`\x1b[32m`) for the monster and bold for the title. Example style (adapt as needed):
+
+```
+      ___
+     /   \
+    | o o |
+    |  ^  |
+    | '-' |
+  __|_____|__
+ /  | === |  \
+/   |     |   \
+|   | === |   |
+\   |_____|   /
+ \_/_______\_/
+   |  | |  |
+   |__|_|__|
+   (__) (__)
+
+  FRANKENBEAST
+```
+
+The banner should be printed once at startup, replacing the current `⚡ RALPH Build Runner — Approach C` line. Keep the banner compact (under 20 lines) so it doesn't overwhelm the terminal.
 
 ## Success Criteria
 
 - [ ] `build-runner.ts` is under 200 lines
+- [ ] ASCII Frankenstein banner displayed on startup (green ANSI, with "FRANKENBEAST" title)
 - [ ] CLI args: `--base-branch` (required), `--plan-dir`, `--budget`, `--mode`, `--provider`, `--no-pr`, `--reset`, `--verbose`, `--help`
 - [ ] `--mode chunks` (default) uses `ChunkFileGraphBuilder`
 - [ ] `--mode design-doc` and `--mode interview` log "not yet implemented" and exit
