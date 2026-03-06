@@ -173,6 +173,7 @@ async function main(): Promise<void> {
 
   // Select graph builder based on mode
   let graphBuilder;
+  let refreshPlanTasks: (() => Promise<readonly { id: string; objective: string; requiredSkills: readonly string[]; dependsOn: readonly string[] }[]>) | undefined;
   let userInput: string;
   if (args.mode === 'interview') {
     const adapterLlm = new AdapterLlmClient(cliExecutor as never);
@@ -191,6 +192,10 @@ async function main(): Promise<void> {
     userInput = docContent;
   } else {
     graphBuilder = new ChunkFileGraphBuilder(args.planDir);
+    refreshPlanTasks = async () => {
+      const latest = await graphBuilder.build({ goal: 'refresh chunk graph' });
+      return latest.tasks;
+    };
     userInput = `Process chunks in ${args.planDir}`;
   }
 
@@ -199,6 +204,7 @@ async function main(): Promise<void> {
     observer, critique: stubCritique, governor: stubGovernor, heartbeat: stubHeartbeat,
     logger, clock: () => new Date(), graphBuilder,
     prCreator, cliExecutor, checkpoint,
+    refreshPlanTasks,
   };
 
   const projectId = repoRoot.split('/').pop() ?? 'unknown';
