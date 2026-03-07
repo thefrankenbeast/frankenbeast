@@ -4,7 +4,8 @@
  * Constructs BeastLoopDeps and calls BeastLoop.run().
  * Each plan directory gets its OWN build-runner.ts — self-contained.
  */
-import { resolve } from 'node:path';
+import { resolve, basename } from 'node:path';
+import { execSync as nodeExecSync } from 'node:child_process';
 import { mkdirSync, existsSync, unlinkSync, appendFileSync, readFileSync, readdirSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import {
@@ -157,9 +158,25 @@ async function main(): Promise<void> {
   // Real deps
   const repoRoot = resolve(args.planDir, '..');
   const checkpoint = new FileCheckpointStore(cpFile);
-  const prCreator = args.noPr ? undefined : new PrCreator({ targetBranch: 'main', disabled: false, remote: 'origin' });
+
+  // Integration branch: chunks merge here, then PR goes from here → baseBranch.
+  // Without this, chunks merge directly to baseBranch and the PR ends up empty.
+  const planDirName = basename(args.planDir);
+  const integrationBranch = `feat/${planDirName}`;
+  const repoGit = (cmd: string) => nodeExecSync(`git ${cmd}`, { cwd: repoRoot, encoding: 'utf-8', stdio: 'pipe' }).trim();
+  const branchExists = repoGit(`branch --list ${integrationBranch}`).length > 0;
+  if (branchExists) {
+    repoGit(`checkout ${integrationBranch}`);
+  } else {
+    const current = repoGit('branch --show-current');
+    if (current !== args.baseBranch) repoGit(`checkout ${args.baseBranch}`);
+    repoGit(`checkout -b ${integrationBranch}`);
+  }
+  logger.info(`Integration branch: ${ANSI.bold}${integrationBranch}${ANSI.reset} (PR target: ${args.baseBranch})`);
+
+  const prCreator = args.noPr ? undefined : new PrCreator({ targetBranch: args.baseBranch, disabled: false, remote: 'origin' });
   const ralph = new RalphLoop();
-  const gitIso = new GitBranchIsolator({ baseBranch: args.baseBranch, branchPrefix: 'feat/', autoCommit: true, workingDir: repoRoot });
+  const gitIso = new GitBranchIsolator({ baseBranch: integrationBranch, branchPrefix: 'feat/', autoCommit: true, workingDir: repoRoot });
   const cliExecutor = new CliSkillExecutor(ralph, gitIso, {
     trace, counter, costCalc, breaker, loopDetector: loopDet,
     startSpan: TraceContext.startSpan, endSpan: TraceContext.endSpan,
