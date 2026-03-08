@@ -10,6 +10,8 @@ export interface GraphBuilder {
   build(intent: PlanIntent): Promise<PlanGraph>;
 }
 
+import { CHUNK_GUARDRAILS as GUARDRAILS } from './chunk-guardrails.js';
+
 /**
  * Reads numbered .md chunk files from a directory and produces a PlanGraph
  * with impl + harden task pairs wired in linear dependency order.
@@ -77,6 +79,7 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
       `Read ${chunkPath}. Implement ALL features described. ` +
       `Use TDD: write failing tests first, then implement, then commit atomically. ` +
       `Run the verification command. ` +
+      GUARDRAILS +
       `Output <promise>IMPL_${chunkId}_DONE</promise> when all success criteria are met and verification passes.\n\n` +
       content
     );
@@ -90,6 +93,7 @@ export class ChunkFileGraphBuilder implements GraphBuilder {
       `2. Run the verification command\n` +
       `3. Fix any failing tests or type errors\n` +
       `4. Ensure all success criteria are met\n` +
+      GUARDRAILS +
       `Output <promise>HARDEN_${chunkId}_DONE</promise> when all success criteria are met and verification passes.\n\n` +
       content
     );

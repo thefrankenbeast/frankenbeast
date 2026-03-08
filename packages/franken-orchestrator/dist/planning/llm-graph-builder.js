@@ -1,3 +1,4 @@
+import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
 /**
  * GraphBuilder implementation that uses ILlmClient.complete() to decompose
  * a design document into a PlanGraph with ordered impl+harden task pairs.
@@ -173,6 +174,7 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
             `Success criteria: ${chunk.successCriteria}\n` +
             `Verification: ${chunk.verificationCommand}\n\n` +
             `Use TDD: write failing tests first, then implement, then commit atomically. ` +
+            CHUNK_GUARDRAILS +
             `Output <promise>IMPL_${chunkId}_DONE</promise> when all success criteria are met and verification passes.`);
     }
     buildHardenPrompt(chunkId, chunk) {
@@ -182,6 +184,7 @@ Respond with ONLY a JSON array. No explanation, no markdown — just the JSON ar
             `2. Run the verification command: ${chunk.verificationCommand}\n` +
             `3. Fix any failing tests or type errors\n` +
             `4. Ensure all success criteria are met: ${chunk.successCriteria}\n` +
+            CHUNK_GUARDRAILS +
             `Output <promise>HARDEN_${chunkId}_DONE</promise> when all success criteria are met and verification passes.`);
     }
 }
