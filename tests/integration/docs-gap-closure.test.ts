@@ -74,6 +74,16 @@ describe('docs/RAMP_UP.md — gap closure updates', () => {
   it('should document CliObserverBridge', () => {
     expect(content()).toContain('CliObserverBridge');
   });
+  it('should acknowledge that skills are still stubbed in local CLI wiring', () => {
+    const text = content();
+    expect(text).toMatch(/skills/i);
+    expect(text).toMatch(/stub/i);
+  });
+
+  it('should not claim the orchestrator depends only on interfaces', () => {
+    const text = content();
+    expect(text).not.toContain('depends only on interfaces, never concrete implementations');
+  });
 });
 
 describe('docs/ARCHITECTURE.md — gap closure updates', () => {
@@ -110,6 +120,16 @@ describe('docs/ARCHITECTURE.md — gap closure updates', () => {
     const text = content();
     expect(text).toContain('CliObserverBridge');
     expect(text).toMatch(/IObserverModule/);
+  });
+  it('should label target architecture separately from the current local CLI path', () => {
+    const text = content();
+    expect(text).toMatch(/target architecture/i);
+    expect(text).toMatch(/current local cli path/i);
+  });
+
+  it('should not claim PR creation currently targets --base-branch', () => {
+    const text = content();
+    expect(text).not.toContain('target: --base-branch');
   });
 });
 

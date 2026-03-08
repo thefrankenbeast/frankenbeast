@@ -76,11 +76,13 @@ describe('README.md Usage section', () => {
     expect(content).toContain('## Usage');
   });
 
-  it('should document interactive session entry modes', () => {
+  it('should document current entry modes', () => {
     const content = readFile('README.md');
     expect(content).toContain('frankenbeast --design-doc');
     expect(content).toContain('frankenbeast --plan-dir');
-    expect(content).toContain('frankenbeast run --resume');
+    expect(content).toContain('frankenbeast interview');
+    expect(content).toContain('frankenbeast plan');
+    expect(content).toContain('frankenbeast run');
   });
 
   it('should document subcommands', () => {
@@ -97,6 +99,9 @@ describe('README.md Usage section', () => {
     expect(content).toContain('--budget');
     expect(content).toContain('--provider');
     expect(content).toContain('--verbose');
+    expect(content).toContain('--config');
+    expect(content).toContain('--design-doc');
+    expect(content).toContain('--plan-dir');
   });
 
   it('should document project layout', () => {
@@ -113,6 +118,13 @@ describe('README.md Usage section', () => {
     expect(content).toContain('## Architecture');
     expect(content).toContain('## Modules');
     expect(content).toContain('## License');
+  });
+
+  it('should not document obsolete frankenbeast flags', () => {
+    const content = readFile('README.md');
+    expect(content).not.toContain('--dry-run');
+    expect(content).not.toContain('--project-id');
+    expect(content).not.toContain('--model');
   });
 });
 
@@ -151,5 +163,11 @@ describe('ARCHITECTURE.md CLI Pipeline section', () => {
     const cliPipelineStart = content.indexOf('## CLI Pipeline');
     const afterSection = content.substring(cliPipelineStart);
     expect(afterSection).toContain('.frankenbeast/');
+  });
+
+  it('should describe target architecture separately from the current CLI path', () => {
+    const content = readFile('docs/ARCHITECTURE.md');
+    expect(content).toMatch(/target architecture/i);
+    expect(content).toMatch(/current local cli path/i);
   });
 });
