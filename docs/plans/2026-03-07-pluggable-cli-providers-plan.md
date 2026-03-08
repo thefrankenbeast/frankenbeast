@@ -1308,6 +1308,8 @@ git commit -m "refactor: RalphLoop uses ProviderRegistry instead of hardcoded di
 
 ### Task 12: Refactor CliLlmAdapter to use ICliProvider
 
+**NOTE:** The `CliLlmAdapterConfig` interface is removed. The constructor now takes `ICliProvider` + opts. This changes the call site in `dep-factory.ts` (Task 13). The existing `AdapterLlmClient(cliLlmAdapter)` wrapper stays unchanged since `CliLlmAdapter` still implements `IAdapter`.
+
 **Files:**
 - Modify: `franken-orchestrator/src/adapters/cli-llm-adapter.ts:1-184`
 - Modify: `franken-orchestrator/tests/unit/adapters/cli-llm-adapter.test.ts:1-302`
@@ -1384,8 +1386,15 @@ git commit -m "refactor: CliLlmAdapter uses ICliProvider instead of hardcoded co
 ### Task 13: Update dep-factory.ts and session.ts
 
 **Files:**
-- Modify: `franken-orchestrator/src/cli/dep-factory.ts:1-155`
+- Modify: `franken-orchestrator/src/cli/dep-factory.ts:1-154`
 - Modify: `franken-orchestrator/src/cli/session.ts:1-267`
+
+**IMPORTANT:** PR #12 added significant wiring to `dep-factory.ts` that must be preserved:
+- `AdapterLlmClient` wraps the adapter for LLM-powered PR titles/descriptions
+- `PrCreator` uses `adapterLlm` (line 122)
+- `commitMessageFn` delegates to `prCreator.generateCommitMessage()` (lines 126-128)
+- `verifyCommand = 'npx tsc --noEmit'` passed to `CliSkillExecutor` (line 132)
+- Read the current file before editing — do not use stale snapshots.
 
 **Step 1: Update CliDepOptions and CliDeps**
 
@@ -1399,27 +1408,48 @@ In `dep-factory.ts`:
 ```typescript
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 
-// In createCliDeps:
+// In createCliDeps, replace the existing RalphLoop/CliLlmAdapter construction:
 const registry = createDefaultRegistry();
+const resolvedProvider = registry.get(options.provider); // fail-fast on unknown
 
-// Apply config overrides
-if (options.providersConfig?.overrides) {
-  // Overrides are passed through ProviderOpts at execution time, not mutating the provider
-}
-
-const provider = registry.get(options.provider);
 const ralph = new RalphLoop(registry);
-const cliLlmAdapter = new CliLlmAdapter(provider, {
+const gitIso = new GitBranchIsolator({
+  baseBranch,
+  branchPrefix: 'feat/',
+  autoCommit: true,
+  workingDir: paths.root,
+});
+const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
   workingDir: paths.root,
   commandOverride: options.providersConfig?.overrides?.[options.provider]?.command,
 });
+
+// PRESERVE existing wiring — these lines stay unchanged:
+const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
+
+const prCreator = noPr ? undefined : new PrCreator(
+  { targetBranch: 'main', disabled: false, remote: 'origin' },
+  undefined,
+  adapterLlm,
+);
+
+const commitMessageFn = prCreator
+  ? (diffStat: string, objective: string) => prCreator.generateCommitMessage(diffStat, objective)
+  : undefined;
+
+const verifyCommand = 'npx tsc --noEmit';
+
+const cliExecutor = new CliSkillExecutor(
+  ralph, gitIso, observerBridge.observerDeps,
+  verifyCommand, commitMessageFn, logger,
+);
 ```
 
 **Step 2: Update SessionConfig in session.ts**
 
 - Change `provider: 'claude' | 'codex'` to `provider: string` (line 22)
 - Add `providers?: string[]` (for fallback chain)
-- Update `buildDepOptions()` to pass `providers` through
+- Update `buildDepOptions()` to pass `providers` and `providersConfig` through
 
 **Step 3: Run full test suite**
 
@@ -1469,9 +1499,11 @@ git commit -m "feat: wire providers config from CLI args and config file into se
 
 ### Task 15: Fail-fast validation at startup
 
+**NOTE:** If Task 13 was implemented correctly, `registry.get(options.provider)` already throws on unknown names. This task just verifies that with a dedicated test.
+
 **Files:**
-- Modify: `franken-orchestrator/src/cli/dep-factory.ts` (add validation)
-- Test: Add to existing dep-factory tests or create `franken-orchestrator/tests/unit/cli/dep-factory-providers.test.ts`
+- Verify: `franken-orchestrator/src/cli/dep-factory.ts` (validation already present from Task 13)
+- Test: Create `franken-orchestrator/tests/unit/cli/dep-factory-providers.test.ts`
 
 **Step 1: Write failing test**
 
@@ -1492,14 +1524,27 @@ describe('createCliDeps — provider validation', () => {
       reset: false,
     })).rejects.toThrow(/Unknown provider "nonexistent"/);
   });
+
+  it('accepts all built-in providers without error', async () => {
+    for (const name of ['claude', 'codex', 'gemini', 'aider']) {
+      // Should not throw on provider resolution (may fail later on file I/O — that's fine)
+      await expect(createCliDeps({
+        paths: { root: '/tmp', plansDir: '/tmp', checkpointFile: '/tmp/cp', tracesDb: '/tmp/traces.db', logFile: '/tmp/log' },
+        baseBranch: 'main',
+        budget: 10,
+        provider: name,
+        noPr: true,
+        verbose: false,
+        reset: false,
+      })).resolves.toBeDefined();
+    }
+  });
 });
 ```
 
-**Step 2: Verify it fails** (currently won't throw)
+**Step 2: Run test — should PASS** if Task 13 was done correctly
 
-**Step 3: Add validation** — `registry.get(options.provider)` already throws. Ensure it's called early in `createCliDeps`.
-
-**Step 4: Run test, commit**
+**Step 3: Commit**
 
 ```bash
 cd franken-orchestrator
@@ -1552,20 +1597,23 @@ git commit -m "docs: ADR 010 — pluggable CLI provider registry"
 
 ### Task 17: Update ARCHITECTURE.md
 
+**IMPORTANT:** PR #12 updated ARCHITECTURE.md with an "Orchestrator Internals" heading and component listings (CliLlmAdapter, CliObserverBridge). Read the current file first — do not use stale snapshots.
+
 **Files:**
 - Modify: `docs/ARCHITECTURE.md`
 
 **Step 1: Read current ARCHITECTURE.md**
 
-Find the CLI pipeline / orchestrator section and update.
+Find the "Orchestrator Internals" section and the CLI pipeline section.
 
 **Step 2: Add provider registry to component diagram**
 
-Add a section or update the existing CLI pipeline section to show:
-- `ICliProvider` interface
-- `ProviderRegistry` with 4 built-in providers
-- How RalphLoop and CliLlmAdapter consume the registry
-- Config-based provider selection
+Update the existing sections to show:
+- `ICliProvider` interface and `ProviderRegistry` under `skills/providers/`
+- 4 built-in providers: Claude, Codex, Gemini, Aider
+- How RalphLoop and CliLlmAdapter consume the registry (not hardcoded dispatch)
+- Config-based provider selection (`providers` section in config)
+- `--provider` and `--providers` CLI flags
 
 **Step 3: Commit**
 
@@ -1577,6 +1625,8 @@ git commit -m "docs: update ARCHITECTURE.md with provider registry"
 ---
 
 ### Task 18: Update RAMP_UP.md
+
+**IMPORTANT:** PR #12 updated RAMP_UP.md with revised orchestrator internals tree, CLI pipeline section, and known limitations. Read the current file first — do not use stale snapshots. Keep the doc under 5000 tokens.
 
 **Files:**
 - Modify: `docs/RAMP_UP.md`
@@ -1594,13 +1644,16 @@ Add `providers/` directory under `skills/`:
 Replace hardcoded `claude --print, codex exec` references with:
 - `CliSkillExecutor` spawns CLI tools via `ProviderRegistry` (claude, codex, gemini, aider)
 - Mention `--provider` and `--providers` flags
-- Mention config file `providers` section
+- Mention config file `providers` section with overrides
 
 **Step 3: Update known limitations**
 
-Remove "CLI requires `--dry-run`" if no longer accurate. Add note about Warp being deferred.
+- Remove any stale limitations that no longer apply
+- Add note: "Warp provider deferred (terminal host, not CLI agent)"
 
-**Step 4: Commit**
+**Step 4: Verify doc stays under 5000 tokens**
+
+**Step 5: Commit**
 
 ```bash
 git add docs/RAMP_UP.md
