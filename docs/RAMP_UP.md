@@ -4,7 +4,7 @@
 
 ## What Is This?
 
-A deterministic guardrails framework for AI agents organized as **11 packages** in this repo: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **3 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`). Hexagonal architecture (ports & adapters) — the orchestrator depends only on interfaces, never concrete implementations.
+A deterministic guardrails framework for AI agents organized as **11 package directories** in this workspace: **8 core modules** (`frankenfirewall` through `franken-heartbeat`) plus **3 supporting packages** (`franken-types`, `franken-mcp`, `franken-orchestrator`). Most Beast Loop contracts are port-oriented, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
 
 ## Modules
 
@@ -83,20 +83,20 @@ franken-orchestrator/src/
 - `--verbose` attempts to start a trace viewer HTTP server on `:4040` (SQLiteAdapter + TraceServer)
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults)
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
-- Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
+- Current local CLI dep wiring is mixed: observer + CLI adapters are real, but `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are stubbed in `src/cli/dep-factory.ts`
 
 ## Build & Test
 
 ```bash
-npm run build        # Build all modules in dependency order
-npm run test         # Root integration tests (vitest)
-npm run test:all     # All module tests + root integration
+npm run build        # Root build loop over 10 package dirs (currently skips franken-mcp)
+npm run test         # Root Vitest run
+npm run test:all     # Per-module test loop + root Vitest (currently skips franken-mcp)
 npm run typecheck    # tsc --noEmit across project
 ```
 
 Per-module: `cd <module> && npm test`
 
-All modules use `tsc` except `franken-planner` (uses `tsup`).
+All modules use `tsc` except `franken-planner` and `franken-observer` (both use `tsup`).
 
 ## Project Config
 
@@ -115,10 +115,10 @@ All modules use `tsc` except `franken-planner` (uses `tsup`).
 
 ## Known Limitations
 
-1. Orchestrator depends on port interfaces, not implementations (by design — hexagonal architecture)
-2. The local CLI path does not yet wire all real module implementations; several deps are stubbed in `franken-orchestrator/src/cli/dep-factory.ts`
+1. The local CLI path is only partially wired: observer and CLI execution are real, but several sibling module deps remain stubbed in `franken-orchestrator/src/cli/dep-factory.ts`
+2. The current CLI path is not purely ports-only: `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`
 3. There is no dedicated `--non-interactive` flag; headless usage currently relies on starting at `plan` or `run` with existing inputs
-4. `--resume` exists, but full resume-from-snapshot execution is not wired; checkpoint-based task skipping is
+4. `--resume` is parsed, but it is not wired as a distinct resume control path; checkpoint-based task skipping still works from existing checkpoint files
 5. `createCliDeps()` currently constructs `PrCreator` with target branch `main`, not the resolved `--base-branch`
 
 ## Key Documentation

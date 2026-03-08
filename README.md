@@ -16,9 +16,11 @@ LLM-based agents routinely lose safety constraints when context windows compress
 
 ## Architecture
 
-Frankenbeast is composed of 10 modules, each in its own repository with independent versioning, tests, and build pipelines. They communicate through typed port/adapter interfaces — no module directly imports another.
+Frankenbeast is organized here as 11 package directories: 8 core modules plus `franken-types`, `franken-mcp`, and `franken-orchestrator`. Most module boundaries are expressed as typed ports/adapters, but the current local CLI path also imports concrete observer classes through `CliObserverBridge`.
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
+
+Current local CLI status: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `RalphLoop`, `GitBranchIsolator`, and checkpoint handling are real. In `franken-orchestrator/src/cli/dep-factory.ts`, `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are still stubbed.
 
 ```mermaid
 flowchart TD
@@ -355,10 +357,9 @@ frankenbeast --design-doc docs/my-feature-design.md
 
 # Start from existing chunk files
 frankenbeast --plan-dir ./my-chunks/
-
-# Resume a previous execution
-frankenbeast run --resume
 ```
+
+Rerunning against an existing `.frankenbeast/.build/.checkpoint` file can skip completed tasks. The `--resume` flag is parsed by the CLI, but it is not yet wired as a distinct resume mode.
 
 ### Subcommands
 
@@ -380,9 +381,12 @@ frankenbeast run
 --base-branch <name>    Git base branch (default: main)
 --budget <usd>          Budget limit in USD (default: 10)
 --provider <name>       claude | codex (default: claude)
+--design-doc <path>     Path to design document
+--plan-dir <path>       Path to chunk files directory
 --no-pr                 Skip PR creation after execution
 --verbose               Debug logs + trace viewer on :4040
 --reset                 Clear checkpoint and traces
+--resume                Parsed, but not yet wired as a distinct resume mode
 --config <path>         Path to config file (JSON)
 --help                  Show help
 ```
@@ -454,7 +458,7 @@ All modules use **dependency injection** — configuration is passed via constru
 
 ```typescript
 // Orchestrator — via config file or CLI flags
-npx frankenbeast --project-id my-project --config frankenbeast.config.json --dry-run
+frankenbeast plan --design-doc docs/my-feature-design.md --config frankenbeast.config.json
 
 // Firewall — standalone service
 import { createFirewallApp } from 'frankenfirewall/server';
@@ -491,7 +495,7 @@ Tasks execute in topological order from the DAG. High-stakes tasks pause for hum
 
 **Modules:** MOD-05 (Observer) + MOD-08 (Heartbeat)
 
-The trace is closed, token spend summarised, and the Heartbeat pulse fires to check for proactive improvements. If improvements are found, self-improvement tasks are injected back into the planner.
+The trace is closed and token spend summarised. In the current local CLI path, heartbeat is still stubbed in `franken-orchestrator/src/cli/dep-factory.ts`, so heartbeat-driven self-improvement should be treated as target architecture rather than a verified end-to-end local flow.
 
 ### Circuit Breakers
 

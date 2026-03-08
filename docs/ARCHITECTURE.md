@@ -4,6 +4,13 @@
 
 Frankenbeast is a deterministic guardrails framework for AI agents, comprising 11 packages:
 
+This document mixes two views:
+
+- **Current local CLI path**: what is actually wired in `franken-orchestrator` today
+- **Target architecture**: the broader end-state diagrams for the full Frankenbeast system
+
+Unless a section explicitly says otherwise, diagrams should be read as target architecture and the prose should call out current local limitations where they matter.
+
 | Package | Role |
 |---------|------|
 | `frankenfirewall` | MOD-01: LLM proxy with injection detection, PII masking, and response validation |
@@ -32,12 +39,22 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 
 1. **Ingestion** — Firewall sanitizes input (injection/PII), Memory hydrates project context
 2. **Planning** — Planner creates task DAG, Critique reviews in loop (max N iterations)
-3. **Execution** — Tasks run in topological order with HITL governor gates; MCP Registry provides external tool execution via connected MCP servers
+3. **Execution** — Tasks run in topological order with HITL governor gates. In the current local CLI path, `executionType: 'cli'` tasks run through `CliSkillExecutor`; MCP remains part of the target architecture unless a concrete `IMcpModule` is wired.
 4. **Closure** — Token accounting, optional heartbeat pulse, result assembly
 
 **Circuit breakers** halt execution on: injection detection (immediate halt), budget exceeded (HITL escalation), critique spiral (HITL escalation).
 
 **Resilience**: Context serialization to disk, graceful SIGTERM/SIGINT handling, module health checks on startup.
+
+### Current Local CLI Path
+
+The current local CLI path is mixed rather than fully wired:
+
+- Real: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `RalphLoop`, `GitBranchIsolator`, `FileCheckpointStore`
+- Stubbed in `src/cli/dep-factory.ts`: firewall, skills registry, memory, planner port, critique, governor, heartbeat
+- `--resume` is parsed but not wired as a distinct resume mode in `run.ts`
+- PR creation is wired, but the local dep factory still hardcodes target branch `main`
+- The CLI path imports concrete observer classes from `@frankenbeast/observer`, so it is not purely ports-only today
 
 ## Orchestrator Internals
 
@@ -139,7 +156,7 @@ flowchart TD
 
 ### Full Pipeline (Approach C)
 
-The orchestrator supports three input modes that all converge to a single execution pipeline, enabling the full path from idea to pull request.
+The CLI exposes three entry modes. The current local path can drive them through the same shell, but the dependency wiring is still partial, so the diagrams below should be read as target architecture with current local caveats noted above.
 
 #### Three Input Modes
 
@@ -149,7 +166,7 @@ The orchestrator supports three input modes that all converge to a single execut
 | `design-doc` | A single design document | LLM via `LlmGraphBuilder` | `LlmGraphBuilder` |
 | `interview` | Natural language goal/prompt | LLM interviews user, generates design doc, decomposes | `InterviewLoop` → `LlmGraphBuilder` |
 
-All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `RalphLoop` → `GitBranchIsolator` → `CliSkillExecutor`. At the end, `PrCreator` opens a PR targeting `--base-branch` (default: `main`).
+All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `RalphLoop` → `GitBranchIsolator` → `CliSkillExecutor`. PR creation is wired through `PrCreator`, but the current local CLI dep factory still hardcodes target branch `main` instead of the resolved `--base-branch`.
 
 #### Data Flow
 
@@ -179,7 +196,7 @@ flowchart TD
 
     PG --> PLN
     EXE -->|per commit| CKP["FileCheckpointStore"]
-    CLO --> PR["gh pr create<br/>(target: --base-branch)"]
+    CLO --> PR["gh pr create<br/>(current local wiring targets main)"]
     CLO --> BR["BeastResult"]
 ```
 
@@ -201,7 +218,7 @@ sequenceDiagram
     participant PRC as PrCreator
     participant OB as Observer
 
-    User->>CLI: beast run --mode chunks|design-doc|interview
+    User->>CLI: frankenbeast | frankenbeast plan --design-doc x | frankenbeast run --plan-dir y
     CLI->>BL: BeastLoop.run(input)
 
     rect rgb(230, 240, 255)
@@ -272,7 +289,7 @@ This preserves the build-runner's impl+harden pattern inside the orchestrator's 
 | `ChunkFileGraphBuilder` | `franken-orchestrator/src/planning/chunk-file-graph-builder.ts` | Reads numbered `.md` chunk files from a directory, produces `PlanGraph` with impl+harden task pairs. No LLM needed. |
 | `LlmGraphBuilder` | `franken-orchestrator/src/planning/llm-graph-builder.ts` | Takes a design doc string, calls `ILlmClient.complete()` with a decomposition prompt, parses response into a `PlanGraph`. |
 | `InterviewLoop` | `franken-orchestrator/src/planning/interview-loop.ts` | Interactive Q&A loop using `ILlmClient` to gather requirements, produces a design doc string, feeds into `LlmGraphBuilder`. |
-| `PrCreator` | `franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create` targeting `--base-branch`. Generates title + body from `BeastResult`. Idempotent — skips if PR already exists. |
+| `PrCreator` | `franken-orchestrator/src/closure/pr-creator.ts` | Runs `gh pr create`. Generates title + body from `BeastResult`. In the current local CLI dep wiring, target branch is still hardcoded to `main`. |
 | `BeastLogger` | `franken-orchestrator/src/logging/beast-logger.ts` | Color-coded logger with ANSI badges and service highlighting for CLI output. |
 | `CLI args/config/run` | `franken-orchestrator/src/cli/args.ts`, `config-loader.ts`, `run.ts` | Thin CLI shell (~150 lines): arg parsing, dep construction, `BeastLoop.run()`, summary display. |
 | Execution checkpoint wiring | `franken-orchestrator/src/phases/execution.ts` | Checks `checkpoint.has(taskId)` before each task, writes checkpoint after completion. Handles dirty-file resume. |
@@ -293,7 +310,7 @@ Per-commit checkpoints enable crash recovery. On resume:
 
 ## CLI Pipeline
 
-The `frankenbeast` CLI is a globally-installed tool that orchestrates the full development workflow:
+The `frankenbeast` CLI is the main local entrypoint. This section describes the current local CLI path, not the fully wired target architecture:
 
 ```mermaid
 flowchart LR
@@ -578,7 +595,7 @@ Canonical type definitions shared across all modules:
 
 ## Port Interfaces (Hexagonal Architecture)
 
-All inter-module communication uses typed port interfaces defined in each module. The orchestrator depends on port abstractions, never on concrete implementations. See [CONTRACT_MATRIX.md](CONTRACT_MATRIX.md) for the full compatibility matrix.
+Most inter-module communication uses typed port interfaces defined in each module. The BeastLoop contracts are still port-oriented, but the current local CLI path is not purely abstracted because `CliObserverBridge` imports concrete classes from `@frankenbeast/observer`. See [CONTRACT_MATRIX.md](CONTRACT_MATRIX.md) for the full compatibility matrix.
 
 | Port | Defined In | Consumed By |
 |------|-----------|-------------|
