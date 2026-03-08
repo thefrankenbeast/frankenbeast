@@ -50,7 +50,7 @@ User Input → [1. Ingestion] → [2. Planning] → [3. Execution] → [4. Closu
 
 The current local CLI path is mixed rather than fully wired:
 
-- Real: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `RalphLoop`, `GitBranchIsolator`, `FileCheckpointStore`
+- Real: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, `FileCheckpointStore`
 - Stubbed in `src/cli/dep-factory.ts`: firewall, skills registry, memory, planner port, critique, governor, heartbeat
 - `--resume` is parsed but not wired as a distinct resume mode in `run.ts`
 - PR creation is wired, but the local dep factory still hardcodes target branch `main`
@@ -60,7 +60,7 @@ The current local CLI path is mixed rather than fully wired:
 
 ### CLI Skill Execution Path
 
-The orchestrator supports `executionType: 'cli'` skills that spawn external CLI AI tools (e.g., `claude --print`, `codex exec`) as child processes. This absorbs the RALPH loop build runner into the orchestrator, reusing existing observer, planner, and circuit breaker infrastructure.
+The orchestrator supports `executionType: 'cli'` skills that spawn external CLI AI tools (e.g., `claude --print`, `codex exec`) as child processes. This absorbs the Martin loop build runner into the orchestrator, reusing existing observer, planner, and circuit breaker infrastructure.
 
 **Components:**
 
@@ -68,8 +68,8 @@ The orchestrator supports `executionType: 'cli'` skills that spawn external CLI 
 |-----------|----------|----------------|
 | `CliLlmAdapter` | `franken-orchestrator/src/adapters/cli-llm-adapter.ts` | Implements `IAdapter` by wrapping `claude --print` (or configurable provider) for single-shot LLM completions. Used by plan/interview phases. Strips `CLAUDE*` env vars to prevent subprocess hangs. |
 | `CliObserverBridge` | `franken-orchestrator/src/adapters/cli-observer-bridge.ts` | Bridges `IObserverModule` ↔ `ObserverDeps`. Wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. |
-| `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs ralph loop, returns `SkillResult`. |
-| `RalphLoop` | `franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
+| `CliSkillExecutor` | `franken-orchestrator/src/skills/cli-skill-executor.ts` | Implements skill execution for `executionType: 'cli'`. Spawns CLI tools, runs martin loop, returns `SkillResult`. |
+| `MartinLoop` | `franken-orchestrator/src/skills/martin-loop.ts` | Core loop: repeat prompt until `<promise>TAG</promise>` detected or max iterations reached. Provider-agnostic. |
 | `GitBranchIsolator` | `franken-orchestrator/src/skills/git-branch-isolator.ts` | Create feature branch, auto-commit dirty files, merge back to base branch. |
 
 **Execution flow:**
@@ -79,7 +79,7 @@ sequenceDiagram
     participant BL as BeastLoop
     participant ET as executeTask()
     participant CSE as CliSkillExecutor
-    participant RL as RalphLoop
+    participant RL as MartinLoop
     participant CLI as CLI Process (claude/codex)
     participant GBI as GitBranchIsolator
     participant OB as Observer (TraceContext)
@@ -92,7 +92,7 @@ sequenceDiagram
 
     loop Until <promise>TAG</promise> or maxIters
         CSE->>RL: run(prompt, promiseTag, maxIters)
-        RL->>OB: startSpan('ralph-iteration')
+        RL->>OB: startSpan('martin-iteration')
         RL->>CLI: spawn claude --print (chunk prompt)
         CLI-->>RL: stdout stream
         RL->>OB: recordTokenUsage()
@@ -127,7 +127,7 @@ flowchart TD
 
     subgraph "Execution Path (multi-iteration tasks)"
         CSE["CliSkillExecutor"]
-        RL["RalphLoop"]
+        RL["MartinLoop"]
         CLI2["claude --print<br/>(subprocess, looped)"]
         CSE --> RL --> CLI2
     end
@@ -166,7 +166,7 @@ The CLI exposes three entry modes. The current local path can drive them through
 | `design-doc` | A single design document | LLM via `LlmGraphBuilder` | `LlmGraphBuilder` |
 | `interview` | Natural language goal/prompt | LLM interviews user, generates design doc, decomposes | `InterviewLoop` → `LlmGraphBuilder` |
 
-All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `RalphLoop` → `GitBranchIsolator` → `CliSkillExecutor`. PR creation is wired through `PrCreator`, but the current local CLI dep factory still hardcodes target branch `main` instead of the resolved `--base-branch`.
+All three modes produce a `PlanGraph` with impl+harden task pairs that execute through the same pipeline: `MartinLoop` → `GitBranchIsolator` → `CliSkillExecutor`. PR creation is wired through `PrCreator`, but the current local CLI dep factory still hardcodes target branch `main` instead of the resolved `--base-branch`.
 
 #### Data Flow
 
@@ -213,7 +213,7 @@ sequenceDiagram
     participant EXE as Execution Phase
     participant CSE as CliSkillExecutor
     participant GBI as GitBranchIsolator
-    participant RL as RalphLoop
+    participant RL as MartinLoop
     participant CKP as FileCheckpointStore
     participant PRC as PrCreator
     participant OB as Observer
@@ -273,7 +273,7 @@ sequenceDiagram
 Each chunk becomes two linked tasks in the `PlanGraph`:
 
 ```
-impl:01_types → harden:01_types → impl:02_ralph → harden:02_ralph → ...
+impl:01_types → harden:01_types → impl:02_martin → harden:02_martin → ...
 ```
 
 - **`impl:<chunkId>`** — TDD implementation. Depends on previous chunk's harden task.

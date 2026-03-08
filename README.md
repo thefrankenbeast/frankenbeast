@@ -20,7 +20,7 @@ Frankenbeast is organized here as 11 package directories: 8 core modules plus `f
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full interconnection diagram.
 
-Current local CLI status: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `RalphLoop`, `GitBranchIsolator`, and checkpoint handling are real. In `franken-orchestrator/src/cli/dep-factory.ts`, `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are still stubbed.
+Current local CLI status: `CliLlmAdapter`, `CliObserverBridge`, `CliSkillExecutor`, `MartinLoop`, `GitBranchIsolator`, and checkpoint handling are real. In `franken-orchestrator/src/cli/dep-factory.ts`, `firewall`, `skills`, `memory`, `planner`, `critique`, `governor`, and `heartbeat` are still stubbed.
 
 ```mermaid
 flowchart TD
@@ -549,7 +549,7 @@ The [examples/](examples/) directory contains working integrations organized by 
 - [research-agent-hitl](examples/scenarios/research-agent-hitl/) — research agent with human approval checkpoints
 - [privacy-first-local](examples/scenarios/privacy-first-local/) — fully local pipeline with PII masking
 
-## RALPH Loop Build System
+## Martin Loop Build System
 
 Frankenbeast includes an observer-powered autonomous build runner based on the [Ralph Wiggum technique](https://ghuntley.com/ralph/) — iterative AI loops that process chunk files with deterministic completion detection.
 
@@ -586,7 +586,7 @@ See [docs/PROGRESS.md](docs/PROGRESS.md) for the full PR-by-PR breakdown.
 
 ### In Progress
 
-- **CLI skill execution** — integrating the RALPH loop build runner into the Beast Loop as a first-class `executionType: 'cli'` skill. This enables BeastLoop to spawn CLI tools (Claude, Codex) with observer-powered tracing, budget enforcement, and git branch isolation. See [plan-beast-runner/](plan-beast-runner/) for the implementation chunks.
+- **CLI skill execution** — integrating the Martin loop build runner into the Beast Loop as a first-class `executionType: 'cli'` skill. This enables BeastLoop to spawn CLI tools (Claude, Codex) with observer-powered tracing, budget enforcement, and git branch isolation. See [plan-beast-runner/](plan-beast-runner/) for the implementation chunks.
 
 ## Development
 
@@ -635,7 +635,7 @@ frankenbeast/
 │   ├── patterns/                # cost-aware-routing, tool-calling, fallback
 │   ├── scenarios/               # code-review-agent, research-agent-hitl
 │   └── openclaw-integration/    # External agent wrapping example
-├── plan-beast-runner/           # RALPH loop build chunks + runner
+├── plan-beast-runner/           # Martin loop build chunks + runner
 │   ├── build-runner.ts          # Observer-powered TypeScript build runner
 │   ├── run-build.sh             # Entry point for autonomous execution
 │   └── 01-08_*.md               # Implementation chunk files

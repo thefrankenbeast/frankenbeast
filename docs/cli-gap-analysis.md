@@ -38,7 +38,7 @@ The frankenbeast project migrated execution capabilities from standalone scripts
 | **Chunk file discovery** | `readdirSync` + `/^\d{2}.*\.md$/` | `ChunkFileGraphBuilder` (same pattern) | Parity |
 | **impl+harden task pairs** | `ChunkFileGraphBuilder` | Same class | Parity |
 | **Topological execution** | `PlanGraph.topoSort()` | Same mechanism via `BeastLoop` | Parity |
-| **RalphLoop subprocess** | `RalphLoop` spawns `claude` CLI | Same class | Parity |
+| **MartinLoop subprocess** | `MartinLoop` spawns `claude` CLI | Same class | Parity |
 | **Git branch isolation** | `GitBranchIsolator` (feat/ prefix) | Same class + squash merge option | Enhanced |
 | **Per-iteration auto-commit** | Yes | Yes | Parity |
 | **Checkpoint crash recovery** | `FileCheckpointStore` (`--reset`) | Same + `--resume` flag | Enhanced |
@@ -60,7 +60,7 @@ The frankenbeast project migrated execution capabilities from standalone scripts
 
 These capabilities work identically (or better) in both:
 
-- **Chunk file execution pipeline**: `ChunkFileGraphBuilder` → `PlanGraph` → topological execution → `CliSkillExecutor` → `RalphLoop` → `GitBranchIsolator`. This is the core execution engine and it's solid.
+- **Chunk file execution pipeline**: `ChunkFileGraphBuilder` → `PlanGraph` → topological execution → `CliSkillExecutor` → `MartinLoop` → `GitBranchIsolator`. This is the core execution engine and it's solid.
 - **Checkpoint/crash recovery**: `FileCheckpointStore` with append-only file. New CLI adds explicit `--resume` flag.
 - **PR creation**: `PrCreator` pushes branch, checks for existing PR, creates via `gh pr create`.
 - **Git branch isolation**: Feature branches per chunk, per-iteration auto-commits, merge back. New CLI adds optional squash merge with commit message.

@@ -60,7 +60,7 @@ franken-orchestrator/src/
 ├── breakers/              # injection, budget, critique-spiral circuit breakers
 ├── checkpoint/            # FileCheckpointStore (plan-scoped crash recovery)
 ├── planning/              # ChunkFileGraphBuilder, LlmGraphBuilder, InterviewLoop
-├── skills/                # CliSkillExecutor, RalphLoop, GitBranchIsolator
+├── skills/                # CliSkillExecutor, MartinLoop, GitBranchIsolator
 ├── cli/                   # args.ts, config-loader.ts, run.ts, trace-viewer.ts
 ├── resilience/            # context-serializer, graceful-shutdown, module-initializer
 ├── config/                # OrchestratorConfigSchema (Zod), defaultConfig
@@ -76,10 +76,10 @@ franken-orchestrator/src/
 - `CliLlmAdapter` implements `IAdapter` — wraps `claude` or `codex` CLI for single-shot LLM completions used by interview/plan flows. It strips all `CLAUDE*` vars before spawn.
 - `CliObserverBridge` bridges `IObserverModule` ↔ `ObserverDeps` — wires real `TokenCounter`, `CostCalculator`, `CircuitBreaker`, `LoopDetector` from franken-observer into the CLI pipeline. Provides real token counting, cost tracking (USD), and budget enforcement.
 - `CliSkillExecutor` spawns CLI tools (`claude --print`, `codex exec`) for multi-iteration task execution
-- `RalphLoop` repeats: prompt → capture → check for `<promise>TAG</promise>` or max iterations
+- `MartinLoop` repeats: prompt → capture → check for `<promise>TAG</promise>` or max iterations
 - `GitBranchIsolator` creates feature branch per chunk, auto-commits, merges back
 - Full Pipeline (Approach C): 3 input modes (chunks / design-doc / interview) → PlanGraph → execute → optional PR
-- CLI output uses service labels (`[planner]`, `[observer]`, `[ralph]`, etc.) for clarity
+- CLI output uses service labels (`[planner]`, `[observer]`, `[martin]`, etc.) for clarity
 - `--verbose` attempts to start a trace viewer HTTP server on `:4040` (SQLiteAdapter + TraceServer)
 - `--config <path>` loads a JSON config file (merged: CLI args > env > file > defaults)
 - `--design-doc <path>` feeds a design doc directly to LlmGraphBuilder for chunk decomposition
@@ -139,4 +139,4 @@ All modules use `tsc` except `franken-planner` and `franken-observer` (both use 
 - **Atomic commits**: One logical change per commit.
 - **ADRs**: Document all non-obvious architectural decisions.
 - **Git remotes**: SSH format `git@github.com-djm204:djm204/<repo>.git`
-- **RALPH workflow**: Automated loop — chunks → impl loop → harden loop → merge → verify
+- **Martin workflow**: Automated loop — chunks → impl loop → harden loop → merge → verify
