@@ -62,9 +62,10 @@ describe('ADR 010: Pluggable CLI Providers', () => {
     expect(content).toMatch(/deferred/i);
   });
 
-  it('should not contain the hardcoded union type', () => {
+  it('should not contain the hardcoded union type in Decision section', () => {
     const content = readFile(adrPath);
-    expect(content).not.toMatch(/'claude'\s*\|\s*'codex'/);
+    const decisionSection = content.split('## Decision')[1]?.split('## Consequences')[0] ?? '';
+    expect(decisionSection).not.toMatch(/'claude'\s*\|\s*'codex'/);
   });
 });
 

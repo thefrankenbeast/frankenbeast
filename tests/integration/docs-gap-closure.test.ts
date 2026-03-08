@@ -110,10 +110,10 @@ describe('docs/ARCHITECTURE.md — gap closure updates', () => {
     expect(text).toContain('claude --print');
   });
 
-  it('should have a Mermaid diagram showing CLI → CliSkillExecutor → RalphLoop', () => {
+  it('should have a Mermaid diagram showing CLI → CliSkillExecutor → MartinLoop', () => {
     const text = content();
     expect(text).toContain('CliSkillExecutor');
-    expect(text).toContain('RalphLoop');
+    expect(text).toContain('MartinLoop');
   });
 
   it('should document CliObserverBridge bridging IObserverModule ↔ ObserverDeps', () => {
