@@ -1,5 +1,19 @@
 node_modules
 .claude
 .worktrees
+.turbo
 # Build runner artifacts (logs, traces, checkpoint) — must be invisible to git/codex/rg
 **/.build/
+
+# Root-level module directories (legacy gitlinks, pending cleanup)
+/franken-brain
+/franken-critique
+/franken-governor
+/franken-heartbeat
+/franken-mcp
+/franken-observer
+/franken-orchestrator
+/franken-planner
+/franken-skills
+/franken-types
+/frankenfirewall
