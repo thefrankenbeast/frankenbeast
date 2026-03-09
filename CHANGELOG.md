@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.7.1](https://github.com/djm204/frankenbeast/compare/v0.7.0...v0.7.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* ensure sub-package releases never become GitHub latest ([da2590d](https://github.com/djm204/frankenbeast/commit/da2590d13ba2f80e09259731f07e0fb84427de4a))
+
 ## [0.7.0](https://github.com/djm204/frankenbeast/compare/v0.6.0...v0.7.0) (2026-03-09)
 
 
