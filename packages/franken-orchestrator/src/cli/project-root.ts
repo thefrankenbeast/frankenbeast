@@ -6,6 +6,8 @@ export interface ProjectPaths {
   frankenbeastDir: string;
   plansDir: string;
   buildDir: string;
+  chunkSessionsDir: string;
+  chunkSessionSnapshotsDir: string;
   checkpointFile: string;
   tracesDb: string;
   logFile: string;
@@ -58,6 +60,8 @@ export function getProjectPaths(root: string, planName?: string): ProjectPaths {
     frankenbeastDir,
     plansDir,
     buildDir,
+    chunkSessionsDir: resolve(buildDir, 'chunk-sessions'),
+    chunkSessionSnapshotsDir: resolve(buildDir, 'chunk-session-snapshots'),
     checkpointFile: resolve(buildDir, '.checkpoint'),
     tracesDb: resolve(buildDir, 'build-traces.db'),
     logFile: resolve(buildDir, 'build.log'),
