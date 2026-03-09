@@ -91,7 +91,7 @@ describe('LlmGraphBuilder', () => {
       const builder = new LlmGraphBuilder(llm);
       const graph = await builder.build(intent);
 
-      // 2 chunks × 2 tasks each = 4 tasks
+      // 2 chunks x 2 tasks each = 4 tasks
       expect(graph.tasks).toHaveLength(4);
     });
 
@@ -208,7 +208,7 @@ describe('LlmGraphBuilder', () => {
       const graph = await builder.build(intent);
 
       const impl02 = taskById(graph.tasks, 'impl:02_feature');
-      // 02_feature depends on 01_setup → impl:02_feature depends on harden:01_setup
+      // 02_feature depends on 01_setup -> impl:02_feature depends on harden:01_setup
       expect(impl02!.dependsOn).toContain('harden:01_setup');
     });
 
@@ -224,7 +224,7 @@ describe('LlmGraphBuilder', () => {
       const builder = new LlmGraphBuilder(llm);
       const graph = await builder.build(intent);
 
-      expect(graph.tasks).toHaveLength(8); // 4 chunks × 2 tasks
+      expect(graph.tasks).toHaveLength(8); // 4 chunks x 2 tasks
       const implMerge = taskById(graph.tasks, 'impl:04_merge');
       expect(implMerge!.dependsOn).toContain('harden:02_left');
       expect(implMerge!.dependsOn).toContain('harden:03_right');
@@ -264,7 +264,7 @@ describe('LlmGraphBuilder', () => {
       const builder = new LlmGraphBuilder(llm);
       const graph = await builder.build(intent);
 
-      // 12 chunks × 2 = 24 tasks (truncated from 15)
+      // 12 chunks x 2 = 24 tasks (truncated from 15)
       expect(graph.tasks).toHaveLength(24);
     });
 
@@ -298,10 +298,10 @@ describe('LlmGraphBuilder', () => {
       }));
 
       const llm = mockLlm(validChunksJson(manyChunks));
-      const builder = new LlmGraphBuilder(llm, { maxChunks: 5 });
+      const builder = new LlmGraphBuilder(llm, undefined, { maxChunks: 5 });
       const graph = await builder.build(intent);
 
-      // 5 chunks × 2 = 10 tasks
+      // 5 chunks x 2 = 10 tasks
       expect(graph.tasks).toHaveLength(10);
     });
   });
@@ -363,6 +363,265 @@ describe('LlmGraphBuilder', () => {
       const graph = await builder.build(intent);
 
       expect(graph.tasks).toEqual([]);
+    });
+  });
+
+  describe('multi-pass pipeline', () => {
+    it('uses contextGatherer when provided', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: 'Ramp up content',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+      // With contextGatherer + skipValidation to avoid needing validator mock
+      const builder = new LlmGraphBuilder(llm, gatherer as any, { skipValidation: true });
+      await builder.build(intent);
+
+      expect(gatherer.gather).toHaveBeenCalledOnce();
+    });
+
+    it('skips validation when skipValidation is true', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+      const builder = new LlmGraphBuilder(llm, gatherer as any, { skipValidation: true });
+      await builder.build(intent);
+
+      // Only 1 LLM call (decompose only, no validate)
+      expect(llm.complete).toHaveBeenCalledOnce();
+    });
+
+    it('works without contextGatherer for backward compatibility', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const builder = new LlmGraphBuilder(llm);
+      const graph = await builder.build(intent);
+
+      expect(graph.tasks).toHaveLength(4);
+    });
+
+    it('exposes lastValidationIssues after build', async () => {
+      const llm = mockLlm(validChunksJson(twoChunks));
+      const builder = new LlmGraphBuilder(llm);
+      await builder.build(intent);
+
+      expect(builder.lastValidationIssues).toEqual([]);
+    });
+
+    it('runs validate+remediate+revalidate when contextGatherer provided and validation fails', async () => {
+      const validationResponse = JSON.stringify({
+        valid: false,
+        issues: [
+          {
+            severity: 'error',
+            chunkId: '01_setup',
+            category: 'chunk_too_thin',
+            description: 'Missing context field',
+            suggestion: 'Add context',
+          },
+        ],
+        revisedChunks: null,
+      });
+
+      const revalidationResponse = JSON.stringify({
+        valid: true,
+        issues: [
+          {
+            severity: 'warning',
+            chunkId: '01_setup',
+            category: 'chunk_too_thin',
+            description: 'Minor style issue',
+            suggestion: 'Consider adding more detail',
+          },
+        ],
+        revisedChunks: null,
+      });
+
+      // Call sequence: decompose -> validate -> remediate -> revalidate
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(twoChunks))   // Pass 1: decompose
+          .mockResolvedValueOnce(validationResponse)            // Pass 2: validate
+          .mockResolvedValueOnce(validChunksJson(twoChunks))   // Pass 3: remediate
+          .mockResolvedValueOnce(revalidationResponse),         // Pass 4: revalidate
+      };
+
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      const graph = await builder.build(intent);
+
+      expect(llm.complete).toHaveBeenCalledTimes(4);
+      expect(graph.tasks).toHaveLength(4);
+      expect(builder.lastValidationIssues).toHaveLength(1);
+      expect(builder.lastValidationIssues[0]!.severity).toBe('warning');
+    });
+
+    it('skips remediation when validation passes', async () => {
+      const validationResponse = JSON.stringify({
+        valid: true,
+        issues: [],
+        revisedChunks: null,
+      });
+
+      // Call sequence: decompose -> validate (passes, no remediate)
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(twoChunks))
+          .mockResolvedValueOnce(validationResponse),
+      };
+
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      await builder.build(intent);
+
+      // Only 2 LLM calls: decompose + validate
+      expect(llm.complete).toHaveBeenCalledTimes(2);
+    });
+
+    it('uses revisedChunks from validation when provided', async () => {
+      const revisedChunks = [
+        {
+          id: 'revised_setup',
+          objective: 'Revised setup',
+          files: ['src/revised.ts'],
+          successCriteria: 'Compiles',
+          verificationCommand: 'npx tsc',
+          dependencies: [],
+        },
+      ];
+
+      const validationResponse = JSON.stringify({
+        valid: true,
+        issues: [],
+        revisedChunks,
+      });
+
+      const llm = {
+        complete: vi.fn()
+          .mockResolvedValueOnce(validChunksJson(twoChunks))
+          .mockResolvedValueOnce(validationResponse),
+      };
+
+      const gatherer = {
+        gather: vi.fn().mockResolvedValue({
+          rampUp: '',
+          relevantSignatures: [],
+          packageDeps: {},
+          existingPatterns: [],
+        }),
+      };
+
+      const builder = new LlmGraphBuilder(llm, gatherer as any);
+      const graph = await builder.build(intent);
+
+      // Should use the revised chunks (1 chunk = 2 tasks)
+      expect(graph.tasks).toHaveLength(2);
+      expect(taskById(graph.tasks, 'impl:revised_setup')).toBeDefined();
+    });
+  });
+
+  describe('10-field prompts', () => {
+    it('impl prompt includes all 10 fields when present', async () => {
+      const fullChunk = JSON.stringify([
+        {
+          id: 'define-types',
+          objective: 'Define types',
+          files: ['src/types.ts'],
+          successCriteria: 'Compiles',
+          verificationCommand: 'npx tsc',
+          dependencies: [],
+          context: 'Existing codebase uses branded types',
+          designDecisions: 'Use branded type pattern',
+          interfaceContract: 'export interface TaskId extends String {}',
+          edgeCases: 'Empty task ID should throw',
+          antiPatterns: 'Never use raw string for IDs',
+        },
+      ]);
+      const llm = mockLlm(fullChunk);
+      const builder = new LlmGraphBuilder(llm);
+      const graph = await builder.build(intent);
+
+      const implTask = taskById(graph.tasks, 'impl:define-types');
+      expect(implTask!.objective).toContain('Existing codebase uses branded types');
+      expect(implTask!.objective).toContain('branded type pattern');
+      expect(implTask!.objective).toContain('TaskId');
+      expect(implTask!.objective).toContain('Empty task ID should throw');
+      expect(implTask!.objective).toContain('Never use raw string');
+    });
+
+    it('harden prompt includes relevant fields when present', async () => {
+      const fullChunk = JSON.stringify([
+        {
+          id: 'define-types',
+          objective: 'Define types',
+          files: ['src/types.ts'],
+          successCriteria: 'Compiles',
+          verificationCommand: 'npx tsc',
+          dependencies: [],
+          context: 'Existing codebase uses branded types',
+          designDecisions: 'Use branded type pattern',
+          interfaceContract: 'export interface TaskId extends String {}',
+          edgeCases: 'Empty task ID should throw',
+          antiPatterns: 'Never use raw string for IDs',
+        },
+      ]);
+      const llm = mockLlm(fullChunk);
+      const builder = new LlmGraphBuilder(llm);
+      const graph = await builder.build(intent);
+
+      const hardenTask = taskById(graph.tasks, 'harden:define-types');
+      expect(hardenTask!.objective).toContain('Existing codebase uses branded types');
+      expect(hardenTask!.objective).toContain('TaskId');
+      expect(hardenTask!.objective).toContain('Empty task ID should throw');
+      expect(hardenTask!.objective).toContain('Never use raw string');
+    });
+
+    it('impl prompt omits optional fields when not present', async () => {
+      const minimalChunk = JSON.stringify([
+        {
+          id: 'minimal',
+          objective: 'Minimal chunk',
+          files: ['src/min.ts'],
+          successCriteria: 'Tests pass',
+          verificationCommand: 'npx vitest run',
+          dependencies: [],
+        },
+      ]);
+      const llm = mockLlm(minimalChunk);
+      const builder = new LlmGraphBuilder(llm);
+      const graph = await builder.build(intent);
+
+      const implTask = taskById(graph.tasks, 'impl:minimal');
+      expect(implTask!.objective).not.toContain('Context:');
+      expect(implTask!.objective).not.toContain('Design decisions:');
+      expect(implTask!.objective).not.toContain('Interface contract:');
+      expect(implTask!.objective).not.toContain('Edge cases:');
+      expect(implTask!.objective).not.toContain('Anti-patterns:');
     });
   });
 });
