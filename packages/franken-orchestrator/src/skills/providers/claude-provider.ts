@@ -19,8 +19,7 @@ export class ClaudeProvider implements ICliProvider {
   readonly chatModel = 'claude-sonnet-4-6';
 
   buildArgs(opts: ProviderOpts): string[] {
-    // chatMode uses native session continuation: first call creates a session,
-    // subsequent calls --continue it. Non-chat always uses --no-session-persistence.
+    // chatMode and chunk-session continuation can both use native CLI resume.
     const args: string[] = [
       '--print', '--dangerously-skip-permissions',
       '--output-format', 'stream-json',
@@ -28,8 +27,8 @@ export class ClaudeProvider implements ICliProvider {
       '--disable-slash-commands',
     ];
 
-    if (opts.chatMode) {
-      if (opts.sessionContinue) args.push('--continue');
+    if (opts.sessionContinue) {
+      args.push('--continue');
     } else {
       args.push('--no-session-persistence');
     }

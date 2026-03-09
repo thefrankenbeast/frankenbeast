@@ -3,6 +3,11 @@
  * Types and interfaces only — no implementation code.
  */
 
+import type { FileChunkSessionStore } from '../session/chunk-session-store.js';
+import type { FileChunkSessionSnapshotStore } from '../session/chunk-session-snapshot-store.js';
+import type { ChunkSessionRenderer } from '../session/chunk-session-renderer.js';
+import type { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
+
 export interface IterationResult {
   readonly iteration: number;
   readonly exitCode: number;
@@ -26,6 +31,20 @@ export interface MartinLoopConfig {
   readonly workingDir?: string | undefined;
   readonly abortSignal?: AbortSignal | undefined;
   readonly providers?: readonly string[] | undefined;
+  readonly planName?: string | undefined;
+  readonly taskId?: string | undefined;
+  readonly chunkId?: string | undefined;
+  readonly sessionStore?: FileChunkSessionStore | undefined;
+  readonly snapshotStore?: FileChunkSessionSnapshotStore | undefined;
+  readonly renderer?: ChunkSessionRenderer | undefined;
+  readonly compactor?: ChunkSessionCompactor | undefined;
+  readonly contextUsage?: ((prompt: string, provider: string, maxTokens: number) => {
+    usedTokens: number;
+    maxTokens: number;
+    usageRatio: number;
+    threshold: number;
+    shouldCompact: boolean;
+  }) | undefined;
   readonly onRateLimit?: ((provider: string) => string | undefined) | undefined;
   readonly onIteration?: ((iteration: number, result: IterationResult) => void) | undefined;
   readonly onSleep?: ((durationMs: number, source: string) => void) | undefined;
