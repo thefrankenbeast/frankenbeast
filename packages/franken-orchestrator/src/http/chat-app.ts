@@ -19,7 +19,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
   });
 
   const app = new Hono();
-  app.use('*', errorHandler);
+  app.onError(errorHandler);
 
   const routes = chatRoutes({ sessionStore, engine });
   app.route('/', routes);

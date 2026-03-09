@@ -33,7 +33,7 @@ export function validateBody<T>(schema: ZodSchema<T>, body: unknown): T {
   return result.data;
 }
 
-export const globalErrorHandler: ErrorHandler = (err, c) => {
+export const errorHandler: ErrorHandler = (err, c) => {
   if (err instanceof HttpError) {
     return c.json(
       {
