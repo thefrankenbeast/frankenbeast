@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createStreamProgressHandler } from '../../../src/adapters/stream-progress.js';
 
 describe('createStreamProgressHandler', () => {
-  it('shows "Thinking..." on first thinking content_block_start', () => {
+  it('shows "Reasoning..." on first thinking content_block_start', () => {
     const lines: string[] = [];
     const handler = createStreamProgressHandler((t) => lines.push(t));
 
@@ -12,10 +12,10 @@ describe('createStreamProgressHandler', () => {
     }));
 
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('Thinking...');
+    expect(lines[0]).toContain('Reasoning...');
   });
 
-  it('only shows "Thinking..." once', () => {
+  it('only shows "Reasoning..." once', () => {
     const lines: string[] = [];
     const handler = createStreamProgressHandler((t) => lines.push(t));
 
@@ -28,7 +28,7 @@ describe('createStreamProgressHandler', () => {
       content_block: { type: 'thinking', thinking: '' },
     }));
 
-    const thinkingLines = lines.filter(l => l.includes('Thinking...'));
+    const thinkingLines = lines.filter(l => l.includes('Reasoning...'));
     expect(thinkingLines).toHaveLength(1);
   });
 
@@ -64,7 +64,7 @@ describe('createStreamProgressHandler', () => {
       duration_ms: 15200,
     }));
 
-    const resultLines = lines.filter(l => l.includes('Completed'));
+    const resultLines = lines.filter(l => l.includes('LLM done'));
     expect(resultLines).toHaveLength(1);
     expect(resultLines[0]).toContain('15.2s');
     expect(resultLines[0]).toContain('$0.0523');

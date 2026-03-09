@@ -1,4 +1,5 @@
 import { readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { BeastLoop } from '../beast-loop.js';
 import { ChunkFileGraphBuilder } from '../planning/chunk-file-graph-builder.js';
 import { LlmGraphBuilder } from '../planning/llm-graph-builder.js';
@@ -180,7 +181,9 @@ export class Session {
 
   private async runInterview(): Promise<'continue' | 'exit'> {
     const { paths, io } = this.config;
-    const { cliLlmAdapter } = await createCliDeps(this.buildDepOptions());
+    const interviewOpts = this.buildDepOptions();
+    interviewOpts.adapterWorkingDir = tmpdir();
+    const { cliLlmAdapter } = await createCliDeps(interviewOpts);
 
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
     const progressLlm = new ProgressLlmClient(adapterLlm);
@@ -255,7 +258,10 @@ export class Session {
   private async runPlan(): Promise<void> {
     const { paths, io, designDocPath } = this.config;
     const depOptions = this.buildDepOptions();
-    // Enable stream progress during planning so the user sees thinking/tool activity
+    // Run planning CLI from tmpdir to prevent project-scoped plugins (superpowers, etc.)
+    // from loading in the spawned CLI. Plugins poison the session by injecting skill
+    // instructions that make the CLI explore the codebase instead of returning JSON.
+    depOptions.adapterWorkingDir = tmpdir();
     depOptions.onStreamLine = createStreamProgressHandler();
     const { cliLlmAdapter, logger } = await createCliDeps(depOptions);
 
@@ -272,10 +278,10 @@ export class Session {
     }
 
     const adapterLlm = new AdapterLlmClient(cliLlmAdapter);
-    // Wrap LLM to cache raw responses to the plan directory
+    // Wrap LLM to cache raw responses to the plan directory.
+    // No ProgressLlmClient spinner — stream progress handler shows real-time activity.
     const cachingLlm = this.wrapWithResponseCache(adapterLlm, paths);
-    const progressLlm = new ProgressLlmClient(cachingLlm, { label: 'Decomposing design...' });
-    const llmGraphBuilder = new LlmGraphBuilder(progressLlm);
+    const llmGraphBuilder = new LlmGraphBuilder(cachingLlm);
 
     logger.info('Decomposing design into chunks...', 'planner');
 
@@ -284,9 +290,11 @@ export class Session {
 
     // Extract chunk definitions from the plan graph tasks
     const chunks = this.extractChunkDefinitions(planGraph);
+    logger.info(`Planned ${chunks.length} chunk(s)`, 'planner');
 
     // Write chunk files
     let chunkPaths = writeChunkFiles(paths, chunks);
+    logger.info(`Wrote chunk files to ${paths.plansDir}`, 'planner');
 
     // Review loop
     await reviewLoop({
