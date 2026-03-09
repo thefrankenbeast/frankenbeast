@@ -154,7 +154,7 @@ export async function main(): Promise<void> {
     });
     const execLlm = new AdapterLlmClient(execAdapter);
 
-    const engine = new ConversationEngine({ llm: chatLlm, projectName: projectId });
+    const engine = new ConversationEngine({ llm: chatLlm, projectName: projectId, sessionContinuation: true });
     const executor = new ChatAgentExecutor({ llm: execLlm });
     const turnRunner = new TurnRunner(executor);
     const repl = new ChatRepl({ engine, turnRunner, projectId, sessionStore, verbose: args.verbose });

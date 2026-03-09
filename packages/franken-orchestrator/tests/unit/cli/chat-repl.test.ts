@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ChatRepl } from '../../../src/cli/chat-repl.js';
+import { ChatRepl, sanitizeChatOutput } from '../../../src/cli/chat-repl.js';
 import type { ChatIO } from '../../../src/cli/chat-repl.js';
 
 const mockProcessTurn = vi.fn().mockResolvedValue({
@@ -116,8 +116,8 @@ describe('ChatRepl', () => {
     });
     await repl.start();
 
-    // The response "Hello!" should be there, but not the tier label
-    expect(outputs.some(o => o === 'Hello!')).toBe(true);
+    // The response "Hello!" should be there (wrapped in ANSI green), but not the tier label
+    expect(outputs.some(o => o.includes('Hello!'))).toBe(true);
     expect(outputs.some(o => o.includes('[cheap]'))).toBe(false);
   });
 
@@ -340,5 +340,57 @@ describe('ChatRepl', () => {
     const secondCall = mockProcessTurn.mock.calls[1];
     expect(secondCall).toBeDefined();
     expect(secondCall[1].length).toBeGreaterThan(0);
+  });
+});
+
+describe('sanitizeChatOutput', () => {
+  it('strips web search results JSON blob and keeps the answer', () => {
+    const raw = [
+      'Web search results for query: "weather Niverville Manitoba"',
+      '',
+      'Links: [{"title":"Environment Canada","url":"https://weather.gc.ca"}]',
+      '',
+      'The weather is -9°C and sunny.',
+    ].join('\n');
+    expect(sanitizeChatOutput(raw)).toBe('The weather is -9°C and sunny.');
+  });
+
+  it('strips REMINDER instruction blocks', () => {
+    const raw = [
+      'The answer is 42.',
+      '',
+      '',
+      'REMINDER: You MUST include the sources above in your response.',
+    ].join('\n');
+    expect(sanitizeChatOutput(raw)).toBe('The answer is 42.');
+  });
+
+  it('strips both web search blob and REMINDER together', () => {
+    const raw = [
+      'Web search results for query: "test query"',
+      '',
+      'Links: [{"title":"Test","url":"https://example.com"}]',
+      '',
+      'Here is the answer.',
+      '',
+      '',
+      'REMINDER: You MUST include the sources.',
+    ].join('\n');
+    expect(sanitizeChatOutput(raw)).toBe('Here is the answer.');
+  });
+
+  it('passes through clean text unchanged', () => {
+    expect(sanitizeChatOutput('Hello, how are you?')).toBe('Hello, how are you?');
+  });
+
+  it('handles multi-link JSON blobs', () => {
+    const raw = [
+      'Web search results for query: "big search"',
+      '',
+      'Links: [{"title":"A","url":"https://a.com"},{"title":"B","url":"https://b.com"},{"title":"C","url":"https://c.com"}]',
+      '',
+      'The result is here.',
+    ].join('\n');
+    expect(sanitizeChatOutput(raw)).toBe('The result is here.');
   });
 });

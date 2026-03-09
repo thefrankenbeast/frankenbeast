@@ -4,7 +4,25 @@ import type { TurnRunner, TurnRunResult } from '../chat/turn-runner.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { TranscriptMessage } from '../chat/types.js';
 import { ANSI } from '../logging/beast-logger.js';
-import { withSpinner } from './spinner.js';
+import { withSpinner, QUIRKY_PHRASES } from './spinner.js';
+
+/**
+ * Strips Claude CLI tool metadata from chat responses:
+ * - "Web search results for query: ..." header + raw JSON "Links: [...]" blob
+ * - "REMINDER: ..." system instruction blocks
+ * Keeps the actual conversational answer.
+ */
+export function sanitizeChatOutput(text: string): string {
+  let cleaned = text;
+
+  // Strip "Web search results for query: ..." line + "Links: [{...}]" JSON blob
+  cleaned = cleaned.replace(/Web search results for query:.*\n\n?Links:\s*\[[\s\S]*?\]\n*/gi, '');
+
+  // Strip "REMINDER:" blocks (from REMINDER to next double-newline or end)
+  cleaned = cleaned.replace(/\n*REMINDER:[\s\S]*$/gi, '');
+
+  return cleaned.trim();
+}
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -20,6 +38,10 @@ export interface ChatIO {
   prompt(): Promise<string>;
   print(msg: string): void;
   close(): void;
+  /** Pause input (block typing while processing). */
+  pause?(): void;
+  /** Resume input after processing. */
+  resume?(): void;
 }
 
 export interface ChatReplOptions {
@@ -35,10 +57,12 @@ function createReadlineIO(): ChatIO {
   const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
   return {
     prompt: () => new Promise<string>((resolve) =>
-      rl.question(`${ANSI.dim}>${ANSI.reset} `, resolve),
+      rl.question(`${ANSI.cyan}>${ANSI.reset} `, resolve),
     ),
     print: (msg: string) => console.log(msg),
     close: () => rl.close(),
+    pause: () => { rl.pause(); process.stdin.pause(); },
+    resume: () => { process.stdin.resume(); rl.resume(); },
   };
 }
 
@@ -89,20 +113,23 @@ export class ChatRepl {
   }
 
   private async processTurn(input: string): Promise<void> {
+    this.io.pause?.();
     let result: TurnResult;
     try {
-      result = await withSpinner('thinking', () => this.engine.processTurn(input, this.transcript), { silent: !process.stderr.isTTY });
+      result = await withSpinner(QUIRKY_PHRASES, () => this.engine.processTurn(input, this.transcript), { silent: !process.stderr.isTTY });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.io.print(`${ANSI.red}error: ${msg}${ANSI.reset}`);
       return;
+    } finally {
+      this.io.resume?.();
     }
 
     this.transcript.push(...result.newMessages);
 
     switch (result.outcome.kind) {
       case 'reply':
-        this.io.print(result.outcome.content);
+        this.io.print(`${ANSI.green}${sanitizeChatOutput(result.outcome.content)}${ANSI.reset}`);
         if (this.verbose) {
           this.io.print(`${ANSI.dim}  [${result.tier}]${ANSI.reset}`);
         }

@@ -21,6 +21,8 @@ export interface ProviderOpts {
   readonly commandOverride?: string | undefined;
   /** When true, omit tool/permission flags — used for conversational chat. */
   readonly chatMode?: boolean | undefined;
+  /** When true, add --continue to resume the previous CLI session (chatMode only). */
+  readonly sessionContinue?: boolean | undefined;
 }
 
 export interface ICliProvider {

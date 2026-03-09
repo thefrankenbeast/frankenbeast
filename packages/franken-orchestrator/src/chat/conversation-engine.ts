@@ -20,6 +20,8 @@ export interface ConversationEngineOptions {
   projectName: string;
   maxTranscriptLength?: number;
   budgetPerSession?: number;
+  /** When true, skip PromptBuilder after first turn — rely on CLI session continuation. */
+  sessionContinuation?: boolean;
 }
 
 export class ConversationEngine {
@@ -28,8 +30,10 @@ export class ConversationEngine {
   private readonly policy: EscalationPolicy;
   private readonly promptBuilder: PromptBuilder;
   private readonly budgetPerSession: number | undefined;
+  private readonly sessionContinuation: boolean;
+  private turnCount = 0;
 
-  constructor({ llm, projectName, maxTranscriptLength, budgetPerSession }: ConversationEngineOptions) {
+  constructor({ llm, projectName, maxTranscriptLength, budgetPerSession, sessionContinuation }: ConversationEngineOptions) {
     this.llm = llm;
     this.router = new IntentRouter();
     this.policy = new EscalationPolicy();
@@ -38,6 +42,7 @@ export class ConversationEngine {
       ...(maxTranscriptLength !== undefined ? { maxMessages: maxTranscriptLength } : {}),
     });
     this.budgetPerSession = budgetPerSession;
+    this.sessionContinuation = sessionContinuation ?? false;
   }
 
   async processTurn(
@@ -77,7 +82,13 @@ export class ConversationEngine {
 
     if (outcome.kind === 'reply') {
       try {
-        const prompt = this.promptBuilder.build([...history, userMessage]);
+        // First turn: full prompt with system context + history.
+        // Subsequent turns with session continuation: raw input only
+        // (CLI session already has context from --continue).
+        const prompt = (this.sessionContinuation && this.turnCount > 0)
+          ? input
+          : this.promptBuilder.build([...history, userMessage]);
+        this.turnCount++;
         const response = await this.llm.complete(prompt);
         const replyOutcome: ReplyOutcome = {
           kind: 'reply',
