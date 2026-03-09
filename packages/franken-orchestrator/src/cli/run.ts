@@ -13,6 +13,11 @@ import { Session } from './session.js';
 import type { SessionPhase } from './session.js';
 import type { InterviewIO } from '../planning/interview-loop.js';
 import { renderBanner, BeastLogger } from '../logging/beast-logger.js';
+import { ChatRepl } from './chat-repl.js';
+import { ConversationEngine } from '../chat/conversation-engine.js';
+import { TurnRunner } from '../chat/turn-runner.js';
+import { FileSessionStore } from '../chat/session-store.js';
+import { join } from 'node:path';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -151,6 +156,22 @@ export async function main(): Promise<void> {
     minCritiqueScore: config.minCritiqueScore,
     maxTotalTokens: config.maxTotalTokens,
   });
+
+  // Chat subcommand dispatches to interactive REPL
+  if (args.subcommand === 'chat') {
+    const chatStoreDir = join(paths.frankenbeastDir, 'chat');
+    const sessionStore = new FileSessionStore(chatStoreDir);
+    const projectId = paths.root.split('/').pop() ?? 'unknown';
+    const llm: { complete(prompt: string): Promise<string> } = {
+      complete: async (prompt: string) => `Echo: ${prompt.slice(0, 100)}`,
+    };
+    const engine = new ConversationEngine({ llm, projectName: projectId });
+    const executor = { execute: async () => ({ status: 'success' as const, summary: 'Done', filesChanged: [], testsRun: 0, errors: [] }) };
+    const turnRunner = new TurnRunner(executor);
+    const repl = new ChatRepl({ engine, turnRunner, io, projectId, sessionStore });
+    await repl.start();
+    return;
+  }
 
   // Issues subcommand dispatches to a separate flow
   if (args.subcommand === 'issues') {
