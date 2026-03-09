@@ -3,6 +3,7 @@ import type { MartinLoopConfig, MartinLoopResult, IterationResult, CliSkillConfi
 import type { SkillInput, SkillResult, ICheckpointStore, ILogger } from '../deps.js';
 import type { MartinLoop } from './martin-loop.js';
 import type { GitBranchIsolator } from './git-branch-isolator.js';
+import type { FileChunkSessionStore } from '../session/chunk-session-store.js';
 
 // ── Number formatting ──
 
@@ -93,6 +94,14 @@ export interface CircuitBreaker {
   check(spendUsd: number): CircuitBreakerResult;
 }
 
+export interface ContextWindowUsage {
+  readonly usedTokens: number;
+  readonly maxTokens: number;
+  readonly usageRatio: number;
+  readonly threshold: number;
+  readonly shouldCompact: boolean;
+}
+
 export interface LoopDetector {
   check(spanName: string): { detected: boolean };
 }
@@ -103,6 +112,12 @@ export interface ObserverDeps {
   readonly costCalc: CostCalculator;
   readonly breaker: CircuitBreaker;
   readonly loopDetector: LoopDetector;
+  estimateContextWindow(input: {
+    renderedPrompt: string;
+    provider: string;
+    maxTokens: number;
+    threshold?: number;
+  }): ContextWindowUsage;
   startSpan(trace: Trace, opts: { name: string; parentSpanId?: string }): Span;
   endSpan(span: Span, opts?: { status?: string; errorMessage?: string }, loopDetector?: LoopDetector): void;
   recordTokenUsage(span: Span, usage: TokenUsage, counter?: TokenCounter): void;
@@ -126,7 +141,10 @@ export class BudgetExceededError extends Error {
 // ── CliSkillExecutor ──
 
 type CommitMessageFn = (diffStat: string, objective: string) => Promise<string | null>;
-type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<MartinLoopConfig, 'command' | 'providers'>>;
+type DefaultMartinConfig = Pick<MartinLoopConfig, 'provider'> & Partial<Pick<
+  MartinLoopConfig,
+  'command' | 'providers' | 'planName' | 'sessionStore' | 'snapshotStore' | 'renderer' | 'compactor' | 'contextUsage'
+>>;
 
 export class CliSkillExecutor {
   private readonly martin: MartinLoop;
@@ -177,6 +195,7 @@ export class CliSkillExecutor {
         const lastHash = checkpoint.lastCommit(taskId, stage);
         if (lastHash) {
           this.git.resetHard(lastHash);
+          this.recordSessionCommit(taskId, lastHash);
           logger?.warn('Recovery: reset to last good commit', { taskId, commitHash: lastHash }, 'git');
         }
         return 'reset';
@@ -187,6 +206,7 @@ export class CliSkillExecutor {
     this.git.autoCommit(chunkId, 'recovery', 0);
     const commitHash = this.git.getCurrentHead();
     checkpoint.recordCommit(taskId, stage, -1, commitHash);
+    this.recordSessionCommit(taskId, commitHash);
     logger?.info('Recovery: auto-committed dirty files', { taskId }, 'git');
     return 'committed';
   }
@@ -233,6 +253,8 @@ export class CliSkillExecutor {
       maxTurns: 25,
       timeoutMs: 600_000,
       workingDir: this.git.getWorkingDir(),
+      taskId,
+      chunkId,
       ...this.defaultMartinConfig,
     };
 
@@ -531,5 +553,25 @@ export class CliSkillExecutor {
       return { model: m, promptTokens: t.promptTokens, completionTokens: t.completionTokens };
     });
     return this.observer.costCalc.totalCost(entries);
+  }
+
+  private recordSessionCommit(taskId: string, commitHash: string): void {
+    const sessionStore = this.defaultMartinConfig.sessionStore as FileChunkSessionStore | undefined;
+    const planName = this.defaultMartinConfig.planName;
+    if (!sessionStore || !planName) {
+      return;
+    }
+
+    const chunkId = this.extractChunkId(taskId);
+    const session = sessionStore.load(planName, chunkId);
+    if (!session) {
+      return;
+    }
+
+    sessionStore.save({
+      ...session,
+      lastKnownGoodCommit: commitHash,
+      updatedAt: new Date().toISOString(),
+    });
   }
 }

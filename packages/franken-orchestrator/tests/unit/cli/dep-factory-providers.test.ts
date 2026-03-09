@@ -173,10 +173,10 @@ describe('dep-factory provider wiring', () => {
       mock: { calls: unknown[][] };
     };
 
-    expect(cliExecutorCall.mock.calls[0]?.[6]).toEqual({
+    expect(cliExecutorCall.mock.calls[0]?.[6]).toEqual(expect.objectContaining({
       provider: 'codex',
       providers: ['codex'],
       command: '/usr/local/bin/codex',
-    });
+    }));
   });
 });

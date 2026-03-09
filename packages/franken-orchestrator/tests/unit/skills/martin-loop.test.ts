@@ -1,9 +1,17 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { MartinLoopConfig, IterationResult } from '../../../src/skills/cli-types.js';
 import { ProviderRegistry } from '../../../src/skills/providers/index.js';
 import type { ICliProvider } from '../../../src/skills/providers/index.js';
+import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
+import { FileChunkSessionSnapshotStore } from '../../../src/session/chunk-session-snapshot-store.js';
+import { ChunkSessionRenderer } from '../../../src/session/chunk-session-renderer.js';
+import { ChunkSessionCompactor } from '../../../src/session/chunk-session-compactor.js';
+import { createChunkSession, createChunkTranscriptEntry } from '../../../src/session/chunk-session.js';
 
 vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
@@ -62,6 +70,7 @@ function baseConfig(overrides?: Partial<MartinLoopConfig>): MartinLoopConfig {
 describe('MartinLoop', () => {
   let MartinLoop: typeof import('../../../src/skills/martin-loop.js').MartinLoop;
   let stdoutWriteSpy: ReturnType<typeof vi.spyOn>;
+  const tmpDirs: string[] = [];
 
   beforeEach(async () => {
     vi.resetAllMocks();
@@ -73,6 +82,9 @@ describe('MartinLoop', () => {
   afterEach(() => {
     stdoutWriteSpy.mockRestore();
     vi.restoreAllMocks();
+    for (const dir of tmpDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   // ── 1. Successful promise detection ──
@@ -471,5 +483,106 @@ describe('MartinLoop', () => {
     expect(promptArg).toContain('git push');
     // Original prompt should still be present
     expect(promptArg).toContain('Implement feature X');
+  });
+
+  it('loads an existing chunk session and continues iterations from canonical state', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-session-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(root);
+    const seeded = {
+      ...createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:01_demo',
+        chunkId: '01_demo',
+        promiseTag: 'IMPL_X_DONE',
+        workingDir: '/tmp/test-project',
+        provider: 'claude',
+        maxTokens: 200000,
+      }),
+      iterations: 2,
+      activeProvider: 'claude',
+      transcript: [createChunkTranscriptEntry('objective', 'resume from canonical state')],
+    };
+    sessionStore.save(seeded);
+
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      planName: 'demo-plan',
+      taskId: 'impl:01_demo',
+      chunkId: '01_demo',
+      sessionStore,
+      renderer: new ChunkSessionRenderer(),
+    }));
+
+    expect(result.completed).toBe(true);
+    const promptArg = (mockSpawn.mock.calls[0]![1] as string[]).at(-1)!;
+    expect(promptArg).toContain('resume from canonical state');
+  });
+
+  it('creates a snapshot before compaction and resumes with compacted state', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-compact-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(root);
+    const snapshotStore = new FileChunkSessionSnapshotStore(root);
+    let compactChecks = 0;
+
+    queueMock({ stdout: 'first output', exitCode: 0 });
+    queueMock({ stdout: 'done\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      planName: 'demo-plan',
+      taskId: 'impl:01_demo',
+      chunkId: '01_demo',
+      sessionStore,
+      snapshotStore,
+      renderer: new ChunkSessionRenderer(),
+      compactor: new ChunkSessionCompactor({
+        summarize: async () => 'Compacted summary',
+      }),
+      contextUsage: () => {
+        compactChecks++;
+        return {
+          usedTokens: compactChecks === 1 ? 900 : 500,
+          maxTokens: 1000,
+          usageRatio: compactChecks === 1 ? 0.9 : 0.5,
+          threshold: 0.85,
+          shouldCompact: compactChecks === 1,
+        };
+      },
+      maxIterations: 2,
+    }));
+
+    expect(result.completed).toBe(true);
+    expect(snapshotStore.list('demo-plan', '01_demo')).toHaveLength(1);
+    const stored = sessionStore.load('demo-plan', '01_demo');
+    expect(stored?.transcript.some((entry) => entry.kind === 'compaction_summary')).toBe(true);
+  });
+
+  it('falls back to replay when provider changes after a failure', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'martin-failover-'));
+    tmpDirs.push(root);
+    const sessionStore = new FileChunkSessionStore(root);
+
+    queueMock({ stderr: 'rate limit exceeded', exitCode: 1 });
+    queueMock({ stdout: 'codex recovered\n<promise>IMPL_X_DONE</promise>', exitCode: 0 });
+
+    const loop = new MartinLoop();
+    const result = await loop.run(baseConfig({
+      providers: ['claude', 'codex'],
+      onRateLimit: () => 'codex',
+      planName: 'demo-plan',
+      taskId: 'impl:01_demo',
+      chunkId: '01_demo',
+      sessionStore,
+      renderer: new ChunkSessionRenderer(),
+    }));
+
+    expect(result.completed).toBe(true);
+    const secondPrompt = (mockSpawn.mock.calls[1]![1] as string[]).at(-1)!;
+    expect(secondPrompt).toContain('Chunk: 01_demo');
+    expect(secondPrompt).toContain('Promise tag: IMPL_X_DONE');
   });
 });

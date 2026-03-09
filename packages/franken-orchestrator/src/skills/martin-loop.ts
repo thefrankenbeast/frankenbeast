@@ -21,6 +21,7 @@ import type { MartinLoopConfig, MartinLoopResult, IterationResult } from './cli-
 import type { ICliProvider } from './providers/cli-provider.js';
 import { ProviderRegistry, createDefaultRegistry } from './providers/cli-provider.js';
 import { tryExtractTextFromNode } from './providers/index.js';
+import { createChunkSession, createChunkTranscriptEntry, type ChunkSession } from '../session/chunk-session.js';
 
 export function parseResetTime(stderr: string, stdout: string): { sleepSeconds: number; source: string } {
   const combined = `${stderr}\n${stdout}`;
@@ -289,11 +290,13 @@ const NO_COMMIT_CONSTRAINT = '\n\nIMPORTANT: Do NOT run git commit, git push, gi
 function spawnIteration(
   config: MartinLoopConfig,
   provider: ICliProvider,
+  promptOverride?: string,
+  sessionContinue = false,
 ): Promise<{ stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string }> {
   return new Promise((resolve, reject) => {
     const cmd = config.command ?? provider.command;
-    const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns });
-    const prompt = config.prompt + NO_COMMIT_CONSTRAINT;
+    const providerArgs = provider.buildArgs({ maxTurns: config.maxTurns, sessionContinue });
+    const prompt = (promptOverride ?? config.prompt) + NO_COMMIT_CONSTRAINT;
     const args = provider.supportsStreamJson()
       ? [...providerArgs, '--', prompt]
       : [...providerArgs, prompt];
@@ -402,6 +405,7 @@ export class MartinLoop {
     let activeProvider: string = config.provider;
     let pendingSleepMs = 0;
     const promiseRegex = new RegExp(`<promise>${escapeRegex(config.promiseTag)}</promise>`);
+    let chunkSession = this.loadOrCreateChunkSession(config, activeProvider);
 
     // Provider exhaustion tracking
     const exhaustedProviders = new Map<string, { stderr: string; stdout: string }>();
@@ -412,10 +416,18 @@ export class MartinLoop {
 
       const resolved = this.registry.get(activeProvider);
       config.onProviderAttempt?.(activeProvider, iteration);
+      let renderedPrompt = config.prompt;
+      let sessionContinue = false;
+
+      if (chunkSession && config.renderer) {
+        const rendered = config.renderer.render(chunkSession, resolved);
+        renderedPrompt = rendered.prompt;
+        sessionContinue = rendered.sessionContinue;
+      }
 
       let result: { stdout: string; stderr: string; exitCode: number; timedOut: boolean; cleanStdout: string };
       try {
-        result = await spawnIteration(config, resolved);
+        result = await spawnIteration(config, resolved, renderedPrompt, sessionContinue);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
         config.onSpawnError?.(activeProvider, msg);
@@ -455,6 +467,39 @@ export class MartinLoop {
 
       config.onIteration?.(iteration, iterResult);
 
+      if (chunkSession) {
+        chunkSession = this.appendIterationOutput(chunkSession, activeProvider, normalizedStdout, iteration);
+
+        if (config.contextUsage) {
+          const usage = config.contextUsage(renderedPrompt, activeProvider, resolved.defaultContextWindowTokens());
+          chunkSession = {
+            ...chunkSession,
+            contextWindow: {
+              ...chunkSession.contextWindow,
+              provider: activeProvider,
+              usedTokens: usage.usedTokens,
+              maxTokens: usage.maxTokens,
+              usageRatio: usage.usageRatio,
+              compactThreshold: usage.threshold,
+            },
+            updatedAt: new Date().toISOString(),
+          };
+        }
+
+        config.sessionStore?.save(chunkSession);
+
+        if (
+          config.contextUsage &&
+          config.snapshotStore &&
+          config.compactor &&
+          chunkSession.contextWindow.usageRatio >= chunkSession.contextWindow.compactThreshold
+        ) {
+          config.snapshotStore.writeSnapshot(chunkSession, 'pre-compaction');
+          chunkSession = await config.compactor.compact(chunkSession);
+          config.sessionStore?.save(chunkSession);
+        }
+      }
+
       // Rate limit: provider fallback chain
       if (rateLimited) {
         iteration--;
@@ -472,6 +517,14 @@ export class MartinLoop {
           // Switch to next provider, retry immediately
           config.onProviderSwitch?.(activeProvider, nextProvider, 'rate-limit');
           activeProvider = nextProvider;
+          if (chunkSession) {
+            chunkSession = {
+              ...chunkSession,
+              activeProvider,
+              updatedAt: new Date().toISOString(),
+            };
+            config.sessionStore?.save(chunkSession);
+          }
           continue;
         }
 
@@ -532,6 +585,14 @@ export class MartinLoop {
           config.onProviderSwitch?.(activeProvider, initialProvider, 'post-sleep-reset');
         }
         activeProvider = initialProvider;
+        if (chunkSession) {
+          chunkSession = {
+            ...chunkSession,
+            activeProvider,
+            updatedAt: new Date().toISOString(),
+          };
+          config.sessionStore?.save(chunkSession);
+        }
         continue;
       }
 
@@ -547,6 +608,49 @@ export class MartinLoop {
     }
 
     return { completed: false, iterations: iteration, output: lastOutput, tokensUsed: totalTokens };
+  }
+
+  private loadOrCreateChunkSession(config: MartinLoopConfig, providerName: string): ChunkSession | undefined {
+    if (!config.sessionStore || !config.planName || !config.chunkId || !config.taskId) {
+      return undefined;
+    }
+
+    const existing = config.sessionStore.load(config.planName, config.chunkId);
+    if (existing) {
+      return existing;
+    }
+
+    const session = createChunkSession({
+      planName: config.planName,
+      taskId: config.taskId,
+      chunkId: config.chunkId,
+      promiseTag: config.promiseTag,
+      workingDir: config.workingDir ?? process.cwd(),
+      provider: providerName,
+      maxTokens: this.registry.get(providerName).defaultContextWindowTokens(),
+    });
+
+    const seeded: ChunkSession = {
+      ...session,
+      transcript: [createChunkTranscriptEntry('objective', config.prompt)],
+    };
+    config.sessionStore.save(seeded);
+    return seeded;
+  }
+
+  private appendIterationOutput(
+    session: ChunkSession,
+    providerName: string,
+    output: string,
+    iteration: number,
+  ): ChunkSession {
+    return {
+      ...session,
+      iterations: iteration,
+      activeProvider: providerName,
+      transcript: [...session.transcript, createChunkTranscriptEntry('assistant', output)],
+      updatedAt: new Date().toISOString(),
+    };
   }
 }
 
