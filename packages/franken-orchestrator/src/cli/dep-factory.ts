@@ -12,6 +12,7 @@ import { FileChunkSessionStore } from '../session/chunk-session-store.js';
 import { FileChunkSessionSnapshotStore } from '../session/chunk-session-snapshot-store.js';
 import { ChunkSessionRenderer } from '../session/chunk-session-renderer.js';
 import { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
+import { ChunkSessionGc } from '../session/chunk-session-gc.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -162,6 +163,13 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const chunkSessionStore = new FileChunkSessionStore(paths.chunkSessionsDir);
   const chunkSessionSnapshotStore = new FileChunkSessionSnapshotStore(paths.chunkSessionSnapshotsDir);
   const chunkSessionRenderer = new ChunkSessionRenderer();
+  const chunkSessionGc = new ChunkSessionGc({
+    sessionRoot: paths.chunkSessionsDir,
+    snapshotRoot: paths.chunkSessionSnapshotsDir,
+    completedTtlMs: 24 * 60 * 60 * 1000,
+    failedTtlMs: 72 * 60 * 60 * 1000,
+  });
+  chunkSessionGc.collect();
   const registry = createDefaultRegistry();
   const martin = new MartinLoop(registry);
   const gitIso = new GitBranchIsolator({
