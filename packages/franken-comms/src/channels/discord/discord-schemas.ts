@@ -31,7 +31,11 @@ export const DiscordInteractionSchema = z.object({
     type: z.number().optional(),
     custom_id: z.string().optional(),
     component_type: z.number().optional(),
-    options: z.array(z.any()).optional(),
+    options: z.array(z.object({
+      name: z.string(),
+      type: z.number(),
+      value: z.unknown().optional(),
+    })).optional(),
   }).optional(),
 });
 

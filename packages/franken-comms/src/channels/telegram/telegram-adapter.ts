@@ -44,8 +44,8 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  private formatPayload(chatId: string, message: ChannelOutboundMessage): any {
-    const payload: any = {
+  private formatPayload(chatId: string, message: ChannelOutboundMessage): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       chat_id: chatId,
       text: this.escapeMarkdown(message.text),
       parse_mode: 'MarkdownV2',

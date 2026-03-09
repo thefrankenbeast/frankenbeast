@@ -1,4 +1,4 @@
-import { createPublicKey, verify } from 'node:crypto';
+import { createPublicKey, verify, type KeyObject } from 'node:crypto';
 import type { Context, Next } from 'hono';
 
 export interface DiscordSignatureOptions {
@@ -14,7 +14,7 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
   const { publicKey } = options;
 
   // Prepare the public key object once (Discord public keys are 32-byte hex strings)
-  let keyObject: any;
+  let keyObject: KeyObject | undefined;
   try {
     // Node.js createPublicKey expects a specific format for Ed25519
     // This is the RFC8410 SPKI format for Ed25519 public keys
@@ -22,7 +22,8 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
     const header = Buffer.from('302a300506032b6570032100', 'hex');
     const spki = Buffer.concat([header, rawKey]);
     keyObject = createPublicKey({ key: spki, format: 'der', type: 'spki' });
-  } catch (error) {
+  } catch {
+
     // If the key is invalid at startup, we let it be but it will fail all requests
   }
 
@@ -44,7 +45,7 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
       if (!isValid) {
         return c.json({ error: 'Invalid signature' }, 401);
       }
-    } catch (error) {
+    } catch {
       return c.json({ error: 'Signature verification failed' }, 401);
     }
 

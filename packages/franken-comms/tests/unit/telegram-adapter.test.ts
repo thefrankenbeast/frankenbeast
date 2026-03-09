@@ -12,7 +12,7 @@ describe('TelegramAdapter', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ ok: true }),
-    } as any);
+    } as Response);
 
     await adapter.send('session-123', {
       text: 'hello telegram',
@@ -32,7 +32,7 @@ describe('TelegramAdapter', () => {
   it('formats inline keyboards for approvals', async () => {
     const adapter = new TelegramAdapter({ token: 'bot-token' });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue({ ok: true } as any);
+    mockFetch.mockResolvedValue({ ok: true } as Response);
 
     await adapter.send('session-123', {
       text: 'Approve?',

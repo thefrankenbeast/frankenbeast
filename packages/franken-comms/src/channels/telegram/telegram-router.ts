@@ -30,7 +30,7 @@ export function telegramRouter(options: TelegramRouterOptions) {
       if (msg.from.is_bot) return c.json({ ok: true });
 
       // Clean up text if it contains commands
-      let text = msg.text;
+      const text = msg.text;
       if (msg.entities) {
         for (const entity of msg.entities) {
           if (entity.type === 'bot_command') {

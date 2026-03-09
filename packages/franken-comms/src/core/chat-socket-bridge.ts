@@ -45,7 +45,7 @@ export class ChatSocketBridge extends EventEmitter {
           const event = JSON.parse(data.toString()) as ServerSocketEvent;
           this.emit('event', event);
           this.emit(event.type, event);
-        } catch (error) {
+        } catch {
           this.emit('error', new Error('Failed to parse server event'));
         }
       });

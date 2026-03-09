@@ -1,6 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { whatsappRouter } from '../../src/channels/whatsapp/whatsapp-router.js';
 import { createHmac } from 'node:crypto';
+import type { ChatGateway } from '../../src/gateway/chat-gateway.js';
+import type { SessionMapper } from '../../src/core/session-mapper.js';
 
 describe('whatsappRouter', () => {
   const appSecret = 'test-secret';
@@ -8,14 +10,14 @@ describe('whatsappRouter', () => {
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),
-  };
+  } as unknown as ChatGateway;
   const sessionMapper = {
     mapToSessionId: vi.fn().mockReturnValue('session-123'),
-  };
+  } as unknown as SessionMapper;
 
   const app = whatsappRouter({
-    gateway: gateway as any,
-    sessionMapper: sessionMapper as any,
+    gateway,
+    sessionMapper,
     appSecret,
     verifyToken,
   });

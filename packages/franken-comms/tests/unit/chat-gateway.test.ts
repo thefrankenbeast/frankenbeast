@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { ChatGateway } from '../../src/gateway/chat-gateway.js';
-import type { ChannelAdapter, ChannelOutboundMessage } from '../../src/core/types.js';
+import type { ChannelAdapter } from '../../src/core/types.js';
+import type { AddressInfo } from 'node:net';
 
 describe('ChatGateway', () => {
   let wss: WebSocketServer;
@@ -10,8 +11,9 @@ describe('ChatGateway', () => {
   beforeEach(async () => {
     wss = new WebSocketServer({ port: 0 });
     await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
-    port = (wss.address() as any).port;
+    port = (wss.address() as AddressInfo).port;
   });
+
 
   afterEach(() => {
     wss.close();

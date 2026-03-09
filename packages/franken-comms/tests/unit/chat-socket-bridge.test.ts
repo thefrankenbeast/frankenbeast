@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { WebSocketServer, WebSocket } from 'ws';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { WebSocketServer } from 'ws';
 import { ChatSocketBridge } from '../../src/core/chat-socket-bridge.js';
 import type { ServerSocketEvent } from '../../../franken-orchestrator/src/http/ws-chat-types.js';
+import type { AddressInfo } from 'node:net';
 
 describe('ChatSocketBridge', () => {
   let wss: WebSocketServer;
@@ -10,7 +11,7 @@ describe('ChatSocketBridge', () => {
   beforeEach(async () => {
     wss = new WebSocketServer({ port: 0 });
     await new Promise<void>((resolve) => wss.on('listening', () => resolve()));
-    port = (wss.address() as any).port;
+    port = (wss.address() as AddressInfo).port;
   });
 
   afterEach(() => {

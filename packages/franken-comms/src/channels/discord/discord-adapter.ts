@@ -56,14 +56,14 @@ export class DiscordAdapter implements ChannelAdapter {
     }
   }
 
-  private formatPayload(message: ChannelOutboundMessage): any {
-    const payload: any = {
+  private formatPayload(message: ChannelOutboundMessage): Record<string, unknown> {
+    const payload: Record<string, unknown> = {
       content: message.text,
       components: [],
     };
 
     if (message.actions && message.actions.length > 0) {
-      payload.components.push({
+      (payload.components as unknown[]).push({
         type: 1, // Action Row
         components: message.actions.map((action) => ({
           type: 2, // Button

@@ -36,7 +36,7 @@ export function whatsappSignatureMiddleware(options: WhatsAppSignatureOptions) {
       if (!timingSafeEqual(signatureBuffer, expectedBuffer)) {
         return c.json({ error: 'Invalid signature' }, 401);
       }
-    } catch (error) {
+    } catch {
       return c.json({ error: 'Signature verification failed' }, 401);
     }
 

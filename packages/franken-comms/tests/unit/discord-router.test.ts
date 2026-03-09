@@ -1,18 +1,20 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { discordRouter } from '../../src/channels/discord/discord-router.js';
 import { DiscordInteractionType } from '../../src/channels/discord/discord-schemas.js';
-import { generateKeyPairSync, sign } from 'node:crypto';
+import { generateKeyPairSync, sign, type KeyPairSyncResult } from 'node:crypto';
+import type { ChatGateway } from '../../src/gateway/chat-gateway.js';
+import type { SessionMapper } from '../../src/core/session-mapper.js';
 
 describe('discordRouter', () => {
-  let keys: any;
+  let keys: KeyPairSyncResult<string, string>;
   let rawPublicKey: string;
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),
-  };
+  } as unknown as ChatGateway;
   const sessionMapper = {
     mapToSessionId: vi.fn().mockReturnValue('session-123'),
-  };
+  } as unknown as SessionMapper;
 
   beforeEach(() => {
     keys = generateKeyPairSync('ed25519');
@@ -26,8 +28,8 @@ describe('discordRouter', () => {
 
   it('handles PING challenge', async () => {
     const app = discordRouter({
-      gateway: gateway as any,
-      sessionMapper: sessionMapper as any,
+      gateway,
+      sessionMapper,
       publicKey: rawPublicKey,
     });
 
@@ -56,8 +58,8 @@ describe('discordRouter', () => {
 
   it('routes slash command to gateway', async () => {
     const app = discordRouter({
-      gateway: gateway as any,
-      sessionMapper: sessionMapper as any,
+      gateway,
+      sessionMapper,
       publicKey: rawPublicKey,
     });
 
@@ -71,7 +73,7 @@ describe('discordRouter', () => {
       user: { id: 'U1', username: 'user' },
       data: {
         name: 'franken',
-        options: [{ name: 'query', value: 'hello' }],
+        options: [{ name: 'query', value: 'hello', type: 3 }],
       },
     });
     const signature = getSignature(body, timestamp);
@@ -94,8 +96,8 @@ describe('discordRouter', () => {
 
   it('routes button click to gateway', async () => {
     const app = discordRouter({
-      gateway: gateway as any,
-      sessionMapper: sessionMapper as any,
+      gateway,
+      sessionMapper,
       publicKey: rawPublicKey,
     });
 

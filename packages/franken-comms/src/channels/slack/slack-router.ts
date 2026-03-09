@@ -30,7 +30,7 @@ export function slackRouter(options: SlackRouterOptions) {
       const event = parsed.event;
       
       // Ignore messages from bots to prevent loops
-      if (event.type === 'message' && (body as any).event.bot_id) {
+      if (event.type === 'message' && event.bot_id) {
         return c.json({ ok: true });
       }
 

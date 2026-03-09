@@ -36,7 +36,7 @@ export function discordRouter(options: DiscordRouterOptions) {
     if (interaction.type === DiscordInteractionType.APPLICATION_COMMAND) {
       const commandName = interaction.data?.name;
       const options = interaction.data?.options || [];
-      const query = options.find((opt: any) => opt.name === 'query')?.value || '';
+      const query = options.find((opt) => opt.name === 'query')?.value || '';
 
       const text = commandName === 'franken' ? query : `/${commandName} ${query}`.trim();
 

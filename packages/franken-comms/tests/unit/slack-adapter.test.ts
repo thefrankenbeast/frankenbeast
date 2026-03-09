@@ -12,7 +12,7 @@ describe('SlackAdapter', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ ok: true }),
-    } as any);
+    } as Response);
 
     await adapter.send('session-123', {
       text: 'hello',
@@ -35,7 +35,7 @@ describe('SlackAdapter', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ ok: true }),
-    } as any);
+    } as Response);
 
     await adapter.send('session-123', {
       text: 'approve?',
@@ -44,8 +44,8 @@ describe('SlackAdapter', () => {
       metadata: { channelId: 'C1' },
     });
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1]!.body as string);
-    const actionsBlock = body.blocks.find((b: any) => b.type === 'actions');
+    const body = JSON.parse(mockFetch.mock.calls[0][1]!.body as string) as { blocks: Array<{ type: string; elements: Array<{ text: { text: string }; style?: string }> }> };
+    const actionsBlock = body.blocks.find((b) => b.type === 'actions');
     expect(actionsBlock.elements[0].text.text).toBe('Approve');
     expect(actionsBlock.elements[0].style).toBe('primary');
   });

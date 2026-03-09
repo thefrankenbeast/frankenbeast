@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { slackSignatureMiddleware } from '../../../src/security/slack-signature.js';
 import { createHmac } from 'node:crypto';

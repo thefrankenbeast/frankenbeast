@@ -48,7 +48,7 @@ export class WhatsAppAdapter implements ChannelAdapter {
     }
   }
 
-  private formatPayload(to: string, message: ChannelOutboundMessage): any {
+  private formatPayload(to: string, message: ChannelOutboundMessage): Record<string, unknown> {
     if (message.actions && message.actions.length > 0) {
       return {
         messaging_product: 'whatsapp',

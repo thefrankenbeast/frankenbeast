@@ -12,7 +12,7 @@ describe('DiscordAdapter', () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({ id: '123' }),
-    } as any);
+    } as Response);
 
     await adapter.send('session-123', {
       text: 'hello from discord',
@@ -35,7 +35,7 @@ describe('DiscordAdapter', () => {
   it('formats buttons and embeds for approval', async () => {
     const adapter = new DiscordAdapter({ token: 'bot-token' });
     const mockFetch = vi.mocked(fetch);
-    mockFetch.mockResolvedValue({ ok: true } as any);
+    mockFetch.mockResolvedValue({ ok: true } as Response);
 
     await adapter.send('session-123', {
       text: 'Approve this change?',

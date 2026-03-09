@@ -1,24 +1,9 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { Hono } from 'hono';
 import { discordSignatureMiddleware } from '../../../src/security/discord-signature.js';
 import { generateKeyPairSync, sign } from 'node:crypto';
 
 describe('discordSignatureMiddleware', () => {
-  let publicKey: string;
-  let privateKey: any;
-  const app = new Hono();
-
-  beforeEach(() => {
-    const keys = generateKeyPairSync('ed25519');
-    privateKey = keys.privateKey;
-    publicKey = keys.publicKey.export({ type: 'spki', format: 'pem' }) as string;
-    // Extract raw hex public key for the middleware as Discord provides it
-    // In a real scenario, this is the 32-byte hex string from Discord Dev Portal
-  });
-
-  // We'll use a simplified mock for the test since PEM/SPKI is easier with node:crypto
-  // but the middleware will expect the hex string.
-  
   it('rejects requests with missing headers', async () => {
     const localApp = new Hono();
     localApp.use('/discord/*', discordSignatureMiddleware({ publicKey: 'dummy' }));

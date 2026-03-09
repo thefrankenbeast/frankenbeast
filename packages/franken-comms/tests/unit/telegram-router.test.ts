@@ -1,19 +1,21 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { telegramRouter } from '../../src/channels/telegram/telegram-router.js';
+import type { ChatGateway } from '../../src/gateway/chat-gateway.js';
+import type { SessionMapper } from '../../src/core/session-mapper.js';
 
 describe('telegramRouter', () => {
   const botToken = 'test-token';
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),
-  };
+  } as unknown as ChatGateway;
   const sessionMapper = {
     mapToSessionId: vi.fn().mockReturnValue('session-123'),
-  };
+  } as unknown as SessionMapper;
 
   const app = telegramRouter({
-    gateway: gateway as any,
-    sessionMapper: sessionMapper as any,
+    gateway,
+    sessionMapper,
     botToken,
   });
 

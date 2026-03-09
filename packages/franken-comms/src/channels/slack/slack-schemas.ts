@@ -12,6 +12,7 @@ export const SlackEventBaseSchema = z.object({
     channel: z.string().optional(),
     thread_ts: z.string().optional(),
     ts: z.string().optional(),
+    bot_id: z.string().optional(),
   }).optional(),
   challenge: z.string().optional(),
 });

@@ -59,8 +59,8 @@ export class SlackAdapter implements ChannelAdapter {
     }
   }
 
-  private formatBlocks(message: ChannelOutboundMessage): any[] {
-    const blocks: any[] = [
+  private formatBlocks(message: ChannelOutboundMessage): Record<string, unknown>[] {
+    const blocks: Record<string, unknown>[] = [
       {
         type: 'section',
         text: {

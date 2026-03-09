@@ -1,22 +1,24 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Hono } from 'hono';
 import { slackRouter } from '../../src/channels/slack/slack-router.js';
 import { SlackInteractionSchema } from '../../src/channels/slack/slack-schemas.js';
 import { createHmac } from 'node:crypto';
+import type { ChatGateway } from '../../src/gateway/chat-gateway.js';
+import type { SessionMapper } from '../../src/core/session-mapper.js';
 
 describe('slackRouter', () => {
   const secret = 'test-secret';
   const gateway = {
     handleInbound: vi.fn().mockResolvedValue(undefined),
     handleAction: vi.fn().mockResolvedValue(undefined),
-  };
+  } as unknown as ChatGateway;
   const sessionMapper = {
     mapToSessionId: vi.fn().mockReturnValue('session-123'),
-  };
+  } as unknown as SessionMapper;
 
   const app = slackRouter({
-    gateway: gateway as any,
-    sessionMapper: sessionMapper as any,
+    gateway,
+    sessionMapper,
     signingSecret: secret,
   });
 
