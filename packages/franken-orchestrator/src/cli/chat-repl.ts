@@ -1,9 +1,10 @@
-import type { InterviewIO } from '../planning/interview-loop.js';
+import { createInterface, type Interface } from 'node:readline';
 import type { ConversationEngine, TurnResult } from '../chat/conversation-engine.js';
 import type { TurnRunner, TurnRunResult } from '../chat/turn-runner.js';
 import type { ISessionStore } from '../chat/session-store.js';
 import type { TranscriptMessage } from '../chat/types.js';
 import { ANSI } from '../logging/beast-logger.js';
+import { withSpinner } from './spinner.js';
 
 const SLASH_COMMANDS = new Set([
   '/plan',
@@ -15,37 +16,57 @@ const SLASH_COMMANDS = new Set([
   '/quit',
 ]);
 
+export interface ChatIO {
+  prompt(): Promise<string>;
+  print(msg: string): void;
+  close(): void;
+}
+
 export interface ChatReplOptions {
   engine: ConversationEngine;
   turnRunner: TurnRunner;
-  io: InterviewIO;
   projectId: string;
   sessionStore?: ISessionStore;
+  verbose?: boolean;
+  io?: ChatIO;
+}
+
+function createReadlineIO(): ChatIO {
+  const rl: Interface = createInterface({ input: process.stdin, output: process.stdout });
+  return {
+    prompt: () => new Promise<string>((resolve) =>
+      rl.question(`${ANSI.dim}>${ANSI.reset} `, resolve),
+    ),
+    print: (msg: string) => console.log(msg),
+    close: () => rl.close(),
+  };
 }
 
 export class ChatRepl {
   private readonly engine: ConversationEngine;
   private readonly turnRunner: TurnRunner;
-  private readonly io: InterviewIO;
   private readonly projectId: string;
   private readonly sessionStore: ISessionStore | undefined;
+  private readonly verbose: boolean;
+  private readonly io: ChatIO;
   private transcript: TranscriptMessage[] = [];
   private pendingApproval = false;
 
   constructor(opts: ChatReplOptions) {
     this.engine = opts.engine;
     this.turnRunner = opts.turnRunner;
-    this.io = opts.io;
     this.projectId = opts.projectId;
     this.sessionStore = opts.sessionStore;
+    this.verbose = opts.verbose ?? false;
+    this.io = opts.io ?? createReadlineIO();
   }
 
   async start(): Promise<void> {
     this.loadExistingSession();
-    this.io.display(`${ANSI.cyan}${ANSI.bold}frankenbeast chat${ANSI.reset} — type /quit to exit`);
+    this.io.print(`\n${ANSI.cyan}${ANSI.bold}frankenbeast chat${ANSI.reset} ${ANSI.dim}— /quit to exit${ANSI.reset}\n`);
 
     for (;;) {
-      const input = await this.io.ask('you>');
+      const input = await this.io.prompt();
       const trimmed = input.trim();
 
       if (trimmed === '') continue;
@@ -54,6 +75,7 @@ export class ChatRepl {
         const cmd = trimmed.split(/\s+/)[0]!.toLowerCase();
         if (cmd === '/quit') {
           this.saveSession();
+          this.io.close();
           break;
         }
         if (SLASH_COMMANDS.has(cmd)) {
@@ -69,100 +91,95 @@ export class ChatRepl {
   private async processTurn(input: string): Promise<void> {
     let result: TurnResult;
     try {
-      result = await this.engine.processTurn(input, this.transcript);
+      result = await withSpinner('thinking', () => this.engine.processTurn(input, this.transcript), { silent: !process.stderr.isTTY });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.io.display(`${ANSI.red}Error: ${msg}${ANSI.reset}`);
+      this.io.print(`${ANSI.red}error: ${msg}${ANSI.reset}`);
       return;
     }
 
-    // Append new messages to transcript
     this.transcript.push(...result.newMessages);
-
-    const tierLabel = `${ANSI.dim}[${result.tier}]${ANSI.reset}`;
 
     switch (result.outcome.kind) {
       case 'reply':
-        this.io.display(`${tierLabel} ${result.outcome.content}`);
+        this.io.print(result.outcome.content);
+        if (this.verbose) {
+          this.io.print(`${ANSI.dim}  [${result.tier}]${ANSI.reset}`);
+        }
         break;
 
       case 'execute':
-        await this.handleExecute(result, tierLabel);
+        await this.handleExecute(result);
         break;
 
       case 'plan':
-        this.io.display(
-          `${tierLabel} ${ANSI.blue}Plan:${ANSI.reset} ${result.outcome.planSummary} (${result.outcome.chunkCount} chunks)`,
+        this.io.print(
+          `${ANSI.blue}plan:${ANSI.reset} ${result.outcome.planSummary} (${result.outcome.chunkCount} chunks)`,
         );
         break;
 
       case 'clarify':
-        this.io.display(
-          `${tierLabel} ${ANSI.yellow}${result.outcome.question}${ANSI.reset}`,
-        );
+        this.io.print(`${ANSI.yellow}${result.outcome.question}${ANSI.reset}`);
         if (result.outcome.options.length > 0) {
-          this.io.display(
-            `  Options: ${result.outcome.options.join(', ')}`,
-          );
+          this.io.print(`  ${result.outcome.options.join(', ')}`);
         }
         break;
     }
   }
 
-  private async handleExecute(result: TurnResult, tierLabel: string): Promise<void> {
+  private async handleExecute(result: TurnResult): Promise<void> {
     const outcome = result.outcome;
     if (outcome.kind !== 'execute') return;
 
-    this.io.display(`${tierLabel} ${ANSI.magenta}Executing:${ANSI.reset} ${outcome.taskDescription}`);
+    this.io.print(`${ANSI.magenta}running:${ANSI.reset} ${outcome.taskDescription}`);
 
     let runResult: TurnRunResult;
     try {
       runResult = await this.turnRunner.run(outcome);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.io.display(`${ANSI.red}Execution error: ${msg}${ANSI.reset}`);
+      this.io.print(`${ANSI.red}execution error: ${msg}${ANSI.reset}`);
       return;
     }
 
     if (runResult.status === 'pending_approval') {
       this.pendingApproval = true;
-      this.io.display(
-        `${ANSI.yellow}${ANSI.bold}Approval required:${ANSI.reset} ${outcome.taskDescription}. Use /approve to continue.`,
+      this.io.print(
+        `${ANSI.yellow}approval required:${ANSI.reset} ${outcome.taskDescription} — use /approve`,
       );
       return;
     }
 
-    this.io.display(`${ANSI.green}${runResult.summary}${ANSI.reset}`);
+    this.io.print(`${ANSI.green}${runResult.summary}${ANSI.reset}`);
   }
 
   private async handleSlashCommand(cmd: string, _raw: string): Promise<void> {
     switch (cmd) {
       case '/plan':
-        this.io.display(`${ANSI.blue}Current plan: use the engine to create a plan.${ANSI.reset}`);
+        this.io.print(`${ANSI.blue}Describe what to plan in natural language.${ANSI.reset}`);
         break;
       case '/run':
-        this.io.display(`${ANSI.magenta}Use natural language to describe what to execute.${ANSI.reset}`);
+        this.io.print(`${ANSI.magenta}Describe what to execute in natural language.${ANSI.reset}`);
         break;
       case '/status':
-        this.io.display(
-          `${ANSI.cyan}Session:${ANSI.reset} project=${this.projectId} turns=${this.transcript.length}`,
+        this.io.print(
+          `${ANSI.dim}project=${this.projectId} messages=${this.transcript.length}${ANSI.reset}`,
         );
         break;
       case '/diff':
-        this.io.display(`${ANSI.dim}No diff available in current session.${ANSI.reset}`);
+        this.io.print(`${ANSI.dim}No diff available.${ANSI.reset}`);
         break;
       case '/approve':
         if (this.pendingApproval) {
           this.pendingApproval = false;
-          this.io.display(`${ANSI.green}Approval granted.${ANSI.reset}`);
+          this.io.print(`${ANSI.green}Approved.${ANSI.reset}`);
         } else {
-          this.io.display(`${ANSI.dim}No pending approval.${ANSI.reset}`);
+          this.io.print(`${ANSI.dim}Nothing pending.${ANSI.reset}`);
         }
         break;
       case '/session':
-        this.io.display(
-          `${ANSI.cyan}Project:${ANSI.reset} ${this.projectId}\n` +
-          `${ANSI.cyan}Transcript:${ANSI.reset} ${this.transcript.length} messages`,
+        this.io.print(
+          `${ANSI.dim}project=${this.projectId} messages=${this.transcript.length}${ANSI.reset}`,
         );
         break;
     }
@@ -175,7 +192,7 @@ export class ChatRepl {
       const session = this.sessionStore.get(id);
       if (session && session.projectId === this.projectId && session.state === 'active') {
         this.transcript = [...session.transcript];
-        this.io.display(`${ANSI.dim}Resumed session ${id} (${session.transcript.length} messages)${ANSI.reset}`);
+        this.io.print(`${ANSI.dim}resumed session (${session.transcript.length} messages)${ANSI.reset}`);
         return;
       }
     }
@@ -184,7 +201,6 @@ export class ChatRepl {
   private saveSession(): void {
     if (!this.sessionStore) return;
 
-    // Try to find existing session to update
     const ids = this.sessionStore.list();
     for (const id of ids) {
       const session = this.sessionStore.get(id);
@@ -196,7 +212,6 @@ export class ChatRepl {
       }
     }
 
-    // No existing session — create one
     const session = this.sessionStore.create(this.projectId);
     session.transcript = this.transcript;
     session.updatedAt = new Date().toISOString();

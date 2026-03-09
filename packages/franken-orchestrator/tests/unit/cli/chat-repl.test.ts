@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ChatRepl } from '../../../src/cli/chat-repl.js';
+import type { ChatIO } from '../../../src/cli/chat-repl.js';
 
-// Mock ConversationEngine
 const mockProcessTurn = vi.fn().mockResolvedValue({
   outcome: { kind: 'reply', content: 'Hello!', modelTier: 'cheap' },
   tier: 'cheap',
@@ -11,25 +11,25 @@ const mockProcessTurn = vi.fn().mockResolvedValue({
   ],
 });
 
-// Mock TurnRunner
 const mockRunTurn = vi.fn().mockResolvedValue({
   status: 'completed',
   summary: 'Done',
   events: [],
 });
 
-// Mock IO
-function mockIO() {
+function mockChatIO() {
   const inputs: string[] = [];
   const outputs: string[] = [];
+  const io: ChatIO = {
+    prompt: vi.fn(() => Promise.resolve(inputs.shift() ?? '/quit')),
+    print: vi.fn((msg: string) => outputs.push(msg)),
+    close: vi.fn(),
+  };
   return {
     pushInput: (line: string) => inputs.push(line),
     inputs,
     outputs,
-    io: {
-      ask: vi.fn(() => Promise.resolve(inputs.shift() ?? '/quit')),
-      display: vi.fn((msg: string) => outputs.push(msg)),
-    },
+    io,
   };
 }
 
@@ -39,15 +39,15 @@ describe('ChatRepl', () => {
   });
 
   it('processes a simple reply turn and displays response', async () => {
-    const { io, outputs, pushInput } = mockIO();
+    const { io, outputs, pushInput } = mockChatIO();
     pushInput('hello');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
@@ -56,51 +56,69 @@ describe('ChatRepl', () => {
   });
 
   it('recognizes /quit and exits', async () => {
-    const { io } = mockIO();
+    const { io } = mockChatIO();
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
-    // Should exit cleanly without error
+    expect(io.close).toHaveBeenCalled();
   });
 
   it('does not send slash commands to the engine', async () => {
-    const { io, pushInput } = mockIO();
+    const { io, pushInput } = mockChatIO();
     pushInput('/status');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
-    // /status should not call the engine
     const engineCalls = mockProcessTurn.mock.calls.filter(
       ([input]: [string]) => input === '/status'
     );
     expect(engineCalls).toHaveLength(0);
   });
 
-  it('displays model tier with each response', async () => {
-    const { io, outputs, pushInput } = mockIO();
+  it('shows tier in verbose mode', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
     pushInput('hello');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      verbose: true,
+      io,
     });
     await repl.start();
 
     expect(outputs.some(o => o.includes('cheap'))).toBe(true);
+  });
+
+  it('hides tier in non-verbose mode', async () => {
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('hello');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: mockProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+    });
+    await repl.start();
+
+    // The response "Hello!" should be there, but not the tier label
+    expect(outputs.some(o => o === 'Hello!')).toBe(true);
+    expect(outputs.some(o => o.includes('[cheap]'))).toBe(false);
   });
 
   it('delegates execute outcomes to TurnRunner', async () => {
@@ -110,15 +128,15 @@ describe('ChatRepl', () => {
       newMessages: [{ role: 'user', content: 'fix the bug', timestamp: new Date().toISOString() }],
     });
 
-    const { io, pushInput } = mockIO();
+    const { io, pushInput } = mockChatIO();
     pushInput('fix the bug');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
@@ -132,15 +150,15 @@ describe('ChatRepl', () => {
       newMessages: [{ role: 'user', content: 'plan refactor', timestamp: new Date().toISOString() }],
     });
 
-    const { io, outputs, pushInput } = mockIO();
+    const { io, outputs, pushInput } = mockChatIO();
     pushInput('plan refactor');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
@@ -154,22 +172,22 @@ describe('ChatRepl', () => {
       newMessages: [{ role: 'user', content: 'set up db', timestamp: new Date().toISOString() }],
     });
 
-    const { io, outputs, pushInput } = mockIO();
+    const { io, outputs, pushInput } = mockChatIO();
     pushInput('set up db');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
     expect(outputs.some(o => o.includes('Which database?'))).toBe(true);
   });
 
-  it('surfaces approval prompts for approvalRequired execute outcomes', async () => {
+  it('surfaces approval prompts for pending_approval status', async () => {
     mockProcessTurn.mockResolvedValueOnce({
       outcome: { kind: 'execute', taskDescription: 'Delete production data', approvalRequired: true },
       tier: 'premium_execution',
@@ -179,43 +197,70 @@ describe('ChatRepl', () => {
     const mockRunner = {
       run: mockRunTurn.mockResolvedValueOnce({
         status: 'pending_approval',
-        summary: 'Approval required: Delete production data',
-        events: [{ type: 'approval_request', data: { taskDescription: 'Delete production data' } }],
+        summary: 'Approval required',
+        events: [],
       }),
     };
 
-    const { io, outputs, pushInput } = mockIO();
+    const { io, outputs, pushInput } = mockChatIO();
     pushInput('delete data');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: mockRunner as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
-    expect(outputs.some(o => o.includes('Approval required') || o.includes('approve'))).toBe(true);
+    expect(outputs.some(o => o.includes('approval required'))).toBe(true);
   });
 
   it('handles /session command without crashing', async () => {
-    const { io, pushInput } = mockIO();
+    const { io, pushInput } = mockChatIO();
     pushInput('/session');
     pushInput('/quit');
 
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
-    // Should not throw
+  });
+
+  it('shows spinner while waiting for LLM reply', async () => {
+    const slowProcessTurn = vi.fn().mockImplementation(async () => {
+      await new Promise((r) => setTimeout(r, 200));
+      return {
+        outcome: { kind: 'reply', content: 'Hi there!', modelTier: 'cheap' },
+        tier: 'cheap',
+        newMessages: [
+          { role: 'user', content: 'hey', timestamp: new Date().toISOString() },
+          { role: 'assistant', content: 'Hi there!', timestamp: new Date().toISOString(), modelTier: 'cheap' },
+        ],
+      };
+    });
+
+    const { io, outputs, pushInput } = mockChatIO();
+    pushInput('hey');
+    pushInput('/quit');
+
+    const repl = new ChatRepl({
+      engine: { processTurn: slowProcessTurn } as any,
+      turnRunner: { run: mockRunTurn } as any,
+      projectId: 'test',
+      io,
+    });
+    await repl.start();
+
+    expect(outputs.some(o => o.includes('Hi there!'))).toBe(true);
   });
 
   it('maintains transcript across turns', async () => {
-    const { io, pushInput } = mockIO();
+    const { io, pushInput } = mockChatIO();
     pushInput('first message');
     pushInput('second message');
     pushInput('/quit');
@@ -223,12 +268,11 @@ describe('ChatRepl', () => {
     const repl = new ChatRepl({
       engine: { processTurn: mockProcessTurn } as any,
       turnRunner: { run: mockRunTurn } as any,
-      io: io,
       projectId: 'test',
+      io,
     });
     await repl.start();
 
-    // Second call should have history from first turn
     const secondCall = mockProcessTurn.mock.calls[1];
     expect(secondCall).toBeDefined();
     expect(secondCall[1].length).toBeGreaterThan(0);
