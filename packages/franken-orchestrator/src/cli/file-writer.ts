@@ -9,6 +9,12 @@ export interface ChunkDefinition {
   successCriteria: string;
   verificationCommand: string;
   dependencies: string[];
+  // New fields — optional for backward compat with hand-written chunks
+  context?: string;
+  designDecisions?: string;
+  interfaceContract?: string;
+  edgeCases?: string;
+  antiPatterns?: string;
 }
 
 /**

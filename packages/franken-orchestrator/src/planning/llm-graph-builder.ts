@@ -3,18 +3,7 @@ import type { PlanGraph, PlanTask, PlanIntent } from '../deps.js';
 import type { GraphBuilder } from './chunk-file-graph-builder.js';
 import { CHUNK_GUARDRAILS } from './chunk-guardrails.js';
 import { cleanLlmJson } from '../skills/providers/stream-json-utils.js';
-
-/**
- * Minimal chunk definition expected from LLM JSON output.
- */
-interface ChunkDefinition {
-  id: string;
-  objective: string;
-  files: string[];
-  successCriteria: string;
-  verificationCommand: string;
-  dependencies: string[];
-}
+import type { ChunkDefinition } from '../cli/file-writer.js';
 
 /**
  * GraphBuilder implementation that uses ILlmClient.complete() to decompose
