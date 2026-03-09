@@ -221,19 +221,18 @@ describe('Session plan phase — CliLlmAdapter wiring', () => {
     expect(mockLlmGraphBuild).toHaveBeenCalled();
   });
 
-  it('runPlan() wraps AdapterLlmClient with ProgressLlmClient before building the plan', async () => {
+  it('runPlan() passes LLM directly to LlmGraphBuilder (no ProgressLlmClient spinner)', async () => {
     const { Session } = await import('../../../src/cli/session.js');
     const config = makeConfig();
     await new Session(config).start();
 
+    // Stream progress replaces the spinner — ProgressLlmClient should NOT be used for planning
     const { ProgressLlmClient } = await import(
       '../../../src/adapters/progress-llm-client.js'
     );
-
-    expect(ProgressLlmClient).toHaveBeenCalled();
-    expect(progressCtorInner).toBeDefined();
-    expect(progressInstance).toBe(llmGraphBuilderCtorArg);
-    expect(progressCtorOptions).toEqual({ label: 'Decomposing design...' });
+    expect(ProgressLlmClient).not.toHaveBeenCalled();
+    // LlmGraphBuilder should still receive an LLM client
+    expect(llmGraphBuilderCtorArg).toBeDefined();
   });
 });
 

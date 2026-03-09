@@ -42,6 +42,14 @@ export interface CliDepOptions {
   dryRun?: boolean | undefined;
   /** Stream line callback for real-time progress during LLM calls. */
   onStreamLine?: ((line: string) => void) | undefined;
+  /**
+   * Override working directory for the LLM adapter.
+   * Use os.tmpdir() for planning calls to prevent project-scoped plugins
+   * (superpowers, feature-dev, etc.) from loading in the spawned CLI.
+   * Plugins load based on .claude/settings.json at the git project root;
+   * running from /tmp means no project root, so no plugins fire.
+   */
+  adapterWorkingDir?: string | undefined;
 }
 
 export interface IssueCliDeps {
@@ -154,7 +162,7 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
   const resolvedProvider = registry.get(options.provider);
   const override = options.providersConfig?.[options.provider];
   const cliLlmAdapter = new CliLlmAdapter(resolvedProvider, {
-    workingDir: paths.root,
+    workingDir: options.adapterWorkingDir ?? paths.root,
     ...(override?.command ? { commandOverride: override.command } : {}),
     ...(options.onStreamLine ? { onStreamLine: options.onStreamLine } : {}),
   });
