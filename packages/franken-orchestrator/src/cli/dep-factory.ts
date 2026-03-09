@@ -8,6 +8,10 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { createDefaultRegistry } from '../skills/providers/cli-provider.js';
 import { CliObserverBridge } from '../adapters/cli-observer-bridge.js';
 import { FileCheckpointStore } from '../checkpoint/file-checkpoint-store.js';
+import { FileChunkSessionStore } from '../session/chunk-session-store.js';
+import { FileChunkSessionSnapshotStore } from '../session/chunk-session-snapshot-store.js';
+import { ChunkSessionRenderer } from '../session/chunk-session-renderer.js';
+import { ChunkSessionCompactor } from '../session/chunk-session-compactor.js';
 import { PrCreator } from '../closure/pr-creator.js';
 import { AdapterLlmClient } from '../adapters/adapter-llm-client.js';
 import { IssueFetcher } from '../issues/issue-fetcher.js';
@@ -155,6 +159,9 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
 
   // CLI execution stack
   const checkpoint = new FileCheckpointStore(checkpointFile);
+  const chunkSessionStore = new FileChunkSessionStore(paths.chunkSessionsDir);
+  const chunkSessionSnapshotStore = new FileChunkSessionSnapshotStore(paths.chunkSessionSnapshotsDir);
+  const chunkSessionRenderer = new ChunkSessionRenderer();
   const registry = createDefaultRegistry();
   const martin = new MartinLoop(registry);
   const gitIso = new GitBranchIsolator({
@@ -196,6 +203,22 @@ export async function createCliDeps(options: CliDepOptions): Promise<CliDeps> {
     verifyCommand, commitMessageFn, logger,
     {
       provider: options.provider,
+      planName,
+      sessionStore: chunkSessionStore,
+      snapshotStore: chunkSessionSnapshotStore,
+      renderer: chunkSessionRenderer,
+      compactor: new ChunkSessionCompactor({
+        summarize: async (prompt: string) => {
+          const response = await adapterLlm.complete(prompt);
+          return response.trim();
+        },
+      }),
+      contextUsage: (prompt: string, provider: string, maxTokens: number) =>
+        observerBridge.estimateContextWindow({
+          renderedPrompt: prompt,
+          provider,
+          maxTokens,
+        }),
       providers: options.providers,
       ...(override?.command ? { command: override.command } : {}),
     },

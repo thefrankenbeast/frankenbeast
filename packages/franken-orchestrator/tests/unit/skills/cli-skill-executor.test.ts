@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { MartinLoopConfig, IterationResult, CliSkillConfig, GitIsolationConfig } from '../../../src/skills/cli-types.js';
 import type { SkillInput, ICheckpointStore } from '../../../src/deps.js';
 import { makeLogger } from '../../helpers/stubs.js';
+import { FileChunkSessionStore } from '../../../src/session/chunk-session-store.js';
+import { createChunkSession } from '../../../src/session/chunk-session.js';
 
 // ── Factories ──
 
@@ -198,6 +203,46 @@ describe('CliSkillExecutor', () => {
         command: '/usr/local/bin/codex',
       }));
     });
+
+    it('passes chunk session services and task metadata into MartinLoop', async () => {
+      const sessionStore = { save: vi.fn(), load: vi.fn(), delete: vi.fn(), list: vi.fn() };
+      const snapshotStore = { writeSnapshot: vi.fn(), list: vi.fn(), restoreLatest: vi.fn() };
+      const renderer = { render: vi.fn() };
+      const compactor = { compact: vi.fn() };
+      const contextUsage = vi.fn();
+
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(
+        martin as any,
+        git as any,
+        observer,
+        undefined,
+        undefined,
+        undefined,
+        {
+          provider: 'claude',
+          planName: 'demo-plan',
+          sessionStore: sessionStore as any,
+          snapshotStore: snapshotStore as any,
+          renderer: renderer as any,
+          compactor: compactor as any,
+          contextUsage,
+        } as any,
+      );
+
+      await executor.execute('cli:01_types', makeSkillInput(), makeCliConfig(), undefined, 'impl:01_types');
+
+      expect(martin.run).toHaveBeenCalledWith(expect.objectContaining({
+        planName: 'demo-plan',
+        taskId: 'impl:01_types',
+        chunkId: '01_types',
+        sessionStore,
+        snapshotStore,
+        renderer,
+        compactor,
+        contextUsage,
+      }));
+    });
   });
 
   describe('failed execution (max iterations)', () => {
@@ -314,6 +359,49 @@ describe('CliSkillExecutor', () => {
 
       expect(git.isolate).toHaveBeenCalledWith('03_git_branch_isolator');
       expect(git.merge).toHaveBeenCalledWith('03_git_branch_isolator');
+    });
+  });
+
+  describe('chunk session recovery metadata', () => {
+    it('records the last known good commit on the chunk session during recovery', async () => {
+      const root = mkdtempSync(join(tmpdir(), 'chunk-recovery-'));
+      const sessionStore = new FileChunkSessionStore(root);
+      const session = createChunkSession({
+        planName: 'demo-plan',
+        taskId: 'impl:11_rate_limit_resilience',
+        chunkId: '11_rate_limit_resilience',
+        promiseTag: 'IMPL_11_rate_limit_resilience_DONE',
+        workingDir: root,
+        provider: 'claude',
+        maxTokens: 200000,
+      });
+      sessionStore.save(session);
+
+      git.getStatus.mockReturnValue(' M src/file.ts');
+      git.getCurrentHead.mockReturnValue('abc123');
+
+      const checkpoint = makeCheckpoint();
+      const { CliSkillExecutor } = await import('../../../src/skills/cli-skill-executor.js');
+      const executor = new CliSkillExecutor(
+        martin as any,
+        git as any,
+        observer,
+        undefined,
+        undefined,
+        undefined,
+        {
+          provider: 'claude',
+          planName: 'demo-plan',
+          sessionStore,
+        } as any,
+      );
+
+      await executor.recoverDirtyFiles('impl:11_rate_limit_resilience', 'impl', checkpoint, makeLogger());
+
+      const stored = sessionStore.load('demo-plan', '11_rate_limit_resilience');
+      expect(stored?.lastKnownGoodCommit).toBe('abc123');
+
+      rmSync(root, { recursive: true, force: true });
     });
   });
 
