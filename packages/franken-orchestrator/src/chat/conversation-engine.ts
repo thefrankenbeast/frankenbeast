@@ -33,7 +33,7 @@ export class ConversationEngine {
     this.policy = new EscalationPolicy();
     this.promptBuilder = new PromptBuilder({
       projectName,
-      maxMessages: maxTranscriptLength,
+      ...(maxTranscriptLength !== undefined ? { maxMessages: maxTranscriptLength } : {}),
     });
   }
 

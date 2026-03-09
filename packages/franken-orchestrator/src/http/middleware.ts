@@ -1,4 +1,7 @@
-import type { ErrorHandler } from 'hono';
+import { randomUUID } from 'node:crypto';
+import type { Context, ErrorHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
+import { createMiddleware } from 'hono/factory';
 import type { ZodSchema } from 'zod';
 
 export interface ApiError {
@@ -20,6 +23,13 @@ export class HttpError extends Error {
   }
 }
 
+export const requestId = createMiddleware(async (c, next) => {
+  const id = c.req.header('x-request-id') ?? randomUUID();
+  c.set('requestId', id);
+  c.header('x-request-id', id);
+  await next();
+});
+
 export function validateBody<T>(schema: ZodSchema<T>, body: unknown): T {
   const result = schema.safeParse(body);
   if (!result.success) {
@@ -31,6 +41,34 @@ export function validateBody<T>(schema: ZodSchema<T>, body: unknown): T {
     );
   }
   return result.data;
+}
+
+export async function parseJsonBody(c: Context): Promise<unknown> {
+  try {
+    return await c.req.json();
+  } catch (error) {
+    if (error instanceof Error && error.name === 'BodyLimitError') {
+      throw new HttpError(413, 'PAYLOAD_TOO_LARGE', 'Request body exceeds configured limit');
+    }
+    throw new HttpError(400, 'MALFORMED_JSON', 'Malformed JSON body');
+  }
+}
+
+export function requestSizeLimit(maxSize: number) {
+  return bodyLimit({
+    maxSize,
+    onError: (c) =>
+      c.json(
+        {
+          error: {
+            code: 'PAYLOAD_TOO_LARGE',
+            message: `Request body exceeds ${maxSize} bytes`,
+            details: { maxSize },
+          },
+        } satisfies ApiError,
+        413,
+      ),
+  });
 }
 
 export const errorHandler: ErrorHandler = (err, c) => {

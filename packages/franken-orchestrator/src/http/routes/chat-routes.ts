@@ -2,14 +2,15 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
-import { HttpError, validateBody } from '../middleware.js';
+import type { TurnRunner, TurnRunResult } from '../../chat/turn-runner.js';
+import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
 
 const CreateSessionBody = z.object({
-  projectId: z.string(),
+  projectId: z.string().min(1),
 }).strict();
 
 const SubmitMessageBody = z.object({
-  content: z.string(),
+  content: z.string().min(1),
 }).strict();
 
 const ApproveBody = z.object({
@@ -19,6 +20,7 @@ const ApproveBody = z.object({
 export interface ChatRoutesDeps {
   sessionStore: ISessionStore;
   engine: ConversationEngine;
+  turnRunner: TurnRunner;
 }
 
 function getSessionOrThrow(store: ISessionStore, id: string) {
@@ -29,8 +31,19 @@ function getSessionOrThrow(store: ISessionStore, id: string) {
   return session;
 }
 
+function sessionStateFromRunStatus(status: TurnRunResult['status']): string {
+  switch (status) {
+    case 'pending_approval':
+      return 'pending_approval';
+    case 'failed':
+      return 'failed';
+    case 'completed':
+      return 'active';
+  }
+}
+
 export function chatRoutes(deps: ChatRoutesDeps): Hono {
-  const { sessionStore, engine } = deps;
+  const { sessionStore, engine, turnRunner } = deps;
   const app = new Hono();
 
   // Health check
@@ -38,7 +51,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
 
   // Create session
   app.post('/v1/chat/sessions', async (c) => {
-    const body = await c.req.json();
+    const body = await parseJsonBody(c);
     const { projectId } = validateBody(CreateSessionBody, body);
     const session = sessionStore.create(projectId);
     return c.json({ data: session }, 201);
@@ -54,14 +67,20 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   // Submit message
   app.post('/v1/chat/sessions/:id/messages', async (c) => {
     const id = c.req.param('id');
-    const session = getSessionOrThrow(sessionStore, id);
-    const body = await c.req.json();
+    const body = await parseJsonBody(c);
     const { content } = validateBody(SubmitMessageBody, body);
+    const session = getSessionOrThrow(sessionStore, id);
 
     const result = await engine.processTurn(content, session.transcript);
+    let state = session.state;
 
-    // Update session transcript and save
+    if (result.outcome.kind === 'execute') {
+      const runResult = await turnRunner.run(result.outcome);
+      state = sessionStateFromRunStatus(runResult.status);
+    }
+
     session.transcript.push(...result.newMessages);
+    session.state = state;
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 
@@ -69,7 +88,7 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       data: {
         outcome: result.outcome,
         tier: result.tier,
-        newMessages: result.newMessages,
+        state: session.state,
       },
     });
   });
@@ -77,15 +96,15 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
   // Approve action
   app.post('/v1/chat/sessions/:id/approve', async (c) => {
     const id = c.req.param('id');
-    const session = getSessionOrThrow(sessionStore, id);
-    const body = await c.req.json();
+    const body = await parseJsonBody(c);
     const { approved } = validateBody(ApproveBody, body);
+    const session = getSessionOrThrow(sessionStore, id);
 
     session.state = approved ? 'approved' : 'rejected';
     session.updatedAt = new Date().toISOString();
     sessionStore.save(session);
 
-    return c.json({ data: { id: session.id, state: session.state } });
+    return c.json({ data: { id: session.id, approved, state: session.state } });
   });
 
   return app;

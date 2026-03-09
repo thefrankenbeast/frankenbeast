@@ -61,6 +61,8 @@ describe('Chat HTTP Routes', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.data.id).toBe(created.id);
+    expect(body.data.transcript).toEqual([]);
+    expect(body.data.state).toBe('active');
   });
 
   it('GET /v1/chat/sessions/:id returns 404 for unknown ID', async () => {
@@ -89,6 +91,12 @@ describe('Chat HTTP Routes', () => {
     const body = await res.json();
     expect(body.data.outcome).toBeDefined();
     expect(body.data.tier).toBeDefined();
+    expect(body.data.state).toBe('active');
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.transcript).toHaveLength(2);
+    expect(sessionBody.data.state).toBe('active');
   });
 
   it('POST /v1/chat/sessions/:id/messages returns 404 for unknown session', async () => {
@@ -112,6 +120,16 @@ describe('Chat HTTP Routes', () => {
     });
     const { data: created } = await createRes.json();
 
+    const submitRes = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'run deployment' }),
+    });
+    expect(submitRes.status).toBe(200);
+    const submitBody = await submitRes.json();
+    expect(submitBody.data.outcome.kind).toBe('execute');
+    expect(submitBody.data.state).toBe('pending_approval');
+
     const res = await app.request(`/v1/chat/sessions/${created.id}/approve`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -119,7 +137,11 @@ describe('Chat HTTP Routes', () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.data).toBeDefined();
+    expect(body.data.state).toBe('approved');
+
+    const sessionRes = await app.request(`/v1/chat/sessions/${created.id}`);
+    const sessionBody = await sessionRes.json();
+    expect(sessionBody.data.state).toBe('approved');
   });
 
   it('POST /v1/chat/sessions/:id/approve returns 404 for unknown session', async () => {
@@ -195,6 +217,35 @@ describe('Chat HTTP Routes', () => {
     expect(body.error.code).toBe('VALIDATION_ERROR');
   });
 
+  it('returns 400 for malformed JSON', async () => {
+    const res = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{"projectId":',
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error.code).toBe('MALFORMED_JSON');
+  });
+
+  it('enforces request size limits', async () => {
+    const createRes = await app.request('/v1/chat/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projectId: 'proj' }),
+    });
+    const { data: created } = await createRes.json();
+
+    const res = await app.request(`/v1/chat/sessions/${created.id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: 'x'.repeat(20_000) }),
+    });
+    expect(res.status).toBe(413);
+    const body = await res.json();
+    expect(body.error.code).toBe('PAYLOAD_TOO_LARGE');
+  });
+
   // --- Success envelope ---
 
   it('all success responses use { data: ... } envelope', async () => {
@@ -223,5 +274,10 @@ describe('Chat HTTP Routes', () => {
     expect(body.error.code).toEqual(expect.any(String));
     expect(body.error.message).toEqual(expect.any(String));
     expect(body).not.toHaveProperty('data');
+  });
+
+  it('sets an x-request-id response header', async () => {
+    const res = await app.request('/health');
+    expect(res.headers.get('x-request-id')).toEqual(expect.any(String));
   });
 });
