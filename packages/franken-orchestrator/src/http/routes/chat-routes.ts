@@ -4,6 +4,7 @@ import type { ISessionStore } from '../../chat/session-store.js';
 import type { ConversationEngine } from '../../chat/conversation-engine.js';
 import type { TurnRunner, TurnRunResult } from '../../chat/turn-runner.js';
 import { HttpError, parseJsonBody, validateBody } from '../middleware.js';
+import { createSseHandler } from '../sse.js';
 
 const CreateSessionBody = z.object({
   projectId: z.string().min(1),
@@ -92,6 +93,9 @@ export function chatRoutes(deps: ChatRoutesDeps): Hono {
       },
     });
   });
+
+  // SSE stream
+  app.get('/v1/chat/sessions/:id/stream', createSseHandler({ sessionStore, turnRunner }));
 
   // Approve action
   app.post('/v1/chat/sessions/:id/approve', async (c) => {

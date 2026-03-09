@@ -10,6 +10,7 @@ export interface ChatAppOptions {
   sessionStoreDir: string;
   llm: ILlmClient;
   projectName: string;
+  turnRunner?: TurnRunner;
 }
 
 const DEFAULT_MAX_BODY_SIZE = 16 * 1024;
@@ -29,7 +30,7 @@ export function createChatApp(opts: ChatAppOptions): Hono {
       errors: [],
     }),
   };
-  const turnRunner = new TurnRunner(executor);
+  const turnRunner = opts.turnRunner ?? new TurnRunner(executor);
 
   const app = new Hono();
   app.use('*', requestId);
