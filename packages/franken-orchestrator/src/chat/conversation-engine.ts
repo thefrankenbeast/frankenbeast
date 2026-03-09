@@ -27,7 +27,7 @@ export class ConversationEngine {
   private readonly router: IntentRouter;
   private readonly policy: EscalationPolicy;
   private readonly promptBuilder: PromptBuilder;
-  private readonly budgetPerSession?: number;
+  private readonly budgetPerSession: number | undefined;
 
   constructor({ llm, projectName, maxTranscriptLength, budgetPerSession }: ConversationEngineOptions) {
     this.llm = llm;

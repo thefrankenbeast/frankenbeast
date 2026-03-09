@@ -101,7 +101,7 @@ describe('CliLlmAdapter', () => {
           { role: 'user', content: 'second message' },
         ],
       });
-      expect(result).toEqual({ prompt: 'second message', maxTurns: 1 });
+      expect(result).toEqual({ prompt: 'second message', maxTurns: 1, model: undefined, chatMode: false });
     });
 
     it('returns empty prompt when no user messages exist', () => {
@@ -112,7 +112,7 @@ describe('CliLlmAdapter', () => {
         model: 'adapter',
         messages: [{ role: 'assistant', content: 'hello' }],
       });
-      expect(result).toEqual({ prompt: '', maxTurns: 1 });
+      expect(result).toEqual({ prompt: '', maxTurns: 1, model: undefined, chatMode: false });
     });
   });
 
@@ -508,7 +508,7 @@ describe('CliLlmAdapter', () => {
       };
 
       const transformed = adapter.transformRequest(request);
-      expect(transformed).toEqual({ prompt: 'What is the answer?', maxTurns: 1 });
+      expect(transformed).toEqual({ prompt: 'What is the answer?', maxTurns: 1, model: undefined, chatMode: false });
 
       const rawResponse = await adapter.execute(transformed);
       expect(typeof rawResponse).toBe('string');

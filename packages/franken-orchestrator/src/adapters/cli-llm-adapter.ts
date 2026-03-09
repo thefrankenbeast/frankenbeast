@@ -2,7 +2,7 @@ import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:c
 import type { IAdapter } from './adapter-llm-client.js';
 import type { ICliProvider } from '../skills/providers/cli-provider.js';
 
-type CliTransformed = { prompt: string; maxTurns: number };
+type CliTransformed = { prompt: string; maxTurns: number; model: string | undefined; chatMode: boolean };
 
 type SpawnFn = (
   command: string,
@@ -14,13 +14,17 @@ export interface CliLlmAdapterOpts {
   workingDir: string;
   timeoutMs?: number;
   commandOverride?: string;
+  /** Override the model used for completions (e.g. 'claude-sonnet-4-6'). */
+  model?: string;
+  /** When true, omit tool/permission flags — used for conversational chat. */
+  chatMode?: boolean;
   /** Called with each complete line of stdout as it arrives (for streaming progress). */
   onStreamLine?: (line: string) => void;
 }
 
 export class CliLlmAdapter implements IAdapter {
   private readonly provider: ICliProvider;
-  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string; onStreamLine?: (line: string) => void };
+  private readonly opts: { workingDir: string; timeoutMs: number; commandOverride?: string; model?: string; chatMode: boolean; onStreamLine?: (line: string) => void };
   private readonly _spawn: SpawnFn;
 
   constructor(
@@ -32,7 +36,9 @@ export class CliLlmAdapter implements IAdapter {
     this.opts = {
       workingDir: opts.workingDir,
       timeoutMs: opts.timeoutMs ?? 120_000,
+      chatMode: opts.chatMode ?? false,
       ...(opts.commandOverride !== undefined ? { commandOverride: opts.commandOverride } : {}),
+      ...(opts.model !== undefined ? { model: opts.model } : {}),
       ...(opts.onStreamLine !== undefined ? { onStreamLine: opts.onStreamLine } : {}),
     };
     this._spawn = _spawnFn ?? (nodeSpawn as SpawnFn);
@@ -44,14 +50,14 @@ export class CliLlmAdapter implements IAdapter {
     };
     const userMessages = req.messages.filter((m) => m.role === 'user');
     const last = userMessages[userMessages.length - 1];
-    return { prompt: last?.content ?? '', maxTurns: 1 };
+    return { prompt: last?.content ?? '', maxTurns: 1, model: this.opts.model, chatMode: this.opts.chatMode };
   }
 
   async execute(providerRequest: unknown): Promise<string> {
-    const { prompt, maxTurns } = providerRequest as CliTransformed;
+    const { prompt, maxTurns, model, chatMode } = providerRequest as CliTransformed;
     const cmd = this.opts.commandOverride ?? this.provider.command;
 
-    const args = this.provider.buildArgs({ maxTurns });
+    const args = this.provider.buildArgs({ maxTurns, model, chatMode });
     args.push(prompt);
 
     const rawEnv: Record<string, string> = {};

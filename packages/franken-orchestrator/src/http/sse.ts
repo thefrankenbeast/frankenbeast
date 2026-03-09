@@ -13,6 +13,12 @@ export function createSseHandler(deps: SseHandlerDeps) {
 
   return async (c: Context) => {
     const id = c.req.param('id');
+    if (!id) {
+      return c.json(
+        { error: { code: 'BAD_REQUEST', message: 'Missing session id' } },
+        400,
+      );
+    }
     const session = sessionStore.get(id);
     if (!session) {
       return c.json(

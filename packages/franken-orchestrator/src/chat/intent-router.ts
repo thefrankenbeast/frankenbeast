@@ -105,8 +105,8 @@ export class IntentRouter {
       return IntentClass.ChatSimple;
     }
 
-    // 8. Fallback — ambiguous
-    return IntentClass.Ambiguous;
+    // 8. Fallback — treat unrecognized input as simple chat (LLM will respond)
+    return IntentClass.ChatSimple;
   }
 }
 

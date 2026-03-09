@@ -72,8 +72,8 @@ describe('IntentRouter', () => {
       expect(router.classify(input)).toBe(IntentClass.Ambiguous);
     });
 
-    it('returns ambiguous for unclear single-word input', () => {
-      expect(router.classify('hmm')).toBe(IntentClass.Ambiguous);
+    it('returns chat_simple for unclear single-word input (fallback)', () => {
+      expect(router.classify('hmm')).toBe(IntentClass.ChatSimple);
     });
   });
 
