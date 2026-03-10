@@ -5,7 +5,7 @@ export interface SessionMapping {
   channelType: ChannelType;
   externalUserId: string;
   externalChannelId: string;
-  externalThreadId?: string;
+  externalThreadId?: string | undefined;
 }
 
 export class SessionMapper {

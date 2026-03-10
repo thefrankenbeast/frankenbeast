@@ -4,19 +4,19 @@ import { randomUUID } from 'node:crypto';
 import type { 
   ClientSocketEvent, 
   ServerSocketEvent 
-} from '../../../franken-orchestrator/src/http/ws-chat-types.js';
+} from '@franken/types';
 
 export interface ChatSocketBridgeOptions {
   url: string;
   sessionId: string;
-  token?: string;
+  token?: string | undefined;
 }
 
 export class ChatSocketBridge extends EventEmitter {
   private ws: WebSocket | null = null;
   private readonly url: string;
   private readonly sessionId: string;
-  private readonly token?: string;
+  private readonly token?: string | undefined;
 
   constructor(options: ChatSocketBridgeOptions) {
     super();

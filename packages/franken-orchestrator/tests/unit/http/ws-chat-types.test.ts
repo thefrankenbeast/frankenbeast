@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import {
-  ClientSocketEventSchema,
-  ServerSocketEventSchema,
-} from '../../../src/http/ws-chat-types.js';
+import { 
+  ClientSocketEventSchema, 
+  ServerSocketEventSchema 
+} from '@franken/types';
 
 describe('ws chat contracts', () => {
   it('accepts a valid message.send event and rejects unknown fields', () => {

@@ -49,6 +49,6 @@ export function discordSignatureMiddleware(options: DiscordSignatureOptions) {
       return c.json({ error: 'Signature verification failed' }, 401);
     }
 
-    await next();
+    return await next();
   };
 }
