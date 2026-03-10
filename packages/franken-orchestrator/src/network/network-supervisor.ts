@@ -30,6 +30,25 @@ export interface NetworkSupervisorStatus {
   services: NetworkServiceHealthStatus[];
 }
 
+function collectDependents(services: ManagedNetworkServiceState[], target: string): ManagedNetworkServiceState[] {
+  const included = new Set<string>();
+
+  const include = (serviceId: string): void => {
+    if (included.has(serviceId)) {
+      return;
+    }
+    included.add(serviceId);
+    for (const service of services) {
+      if (service.dependsOn.includes(serviceId)) {
+        include(service.id);
+      }
+    }
+  };
+
+  include(target);
+  return services.filter((service) => included.has(service.id));
+}
+
 export class NetworkSupervisor {
   private readonly now: () => string;
 
@@ -91,6 +110,45 @@ export class NetworkSupervisor {
 
     await this.stopAll(state);
     await this.deps.stateStore.clear();
+  }
+
+  async stop(target: string | 'all'): Promise<void> {
+    const state = await this.deps.stateStore.load();
+    if (!state) {
+      return;
+    }
+
+    const selected = target === 'all'
+      ? state.services
+      : collectDependents(state.services, target);
+
+    for (const service of [...selected].reverse()) {
+      await this.deps.stopService(service);
+    }
+
+    if (target === 'all') {
+      await this.deps.stateStore.clear();
+      return;
+    }
+
+    const remaining = state.services.filter((service) => !selected.some((candidate) => candidate.id === service.id));
+    if (remaining.length === 0) {
+      await this.deps.stateStore.clear();
+      return;
+    }
+
+    await this.deps.stateStore.save({
+      ...state,
+      services: remaining,
+    });
+  }
+
+  async logs(target: string | 'all'): Promise<string[]> {
+    const state = await this.deps.stateStore.load();
+    if (!state) {
+      return [];
+    }
+    return this.deps.logStore.resolve(state, target);
   }
 
   async status(_registry?: Map<string, NetworkServiceDefinition>): Promise<NetworkSupervisorStatus> {

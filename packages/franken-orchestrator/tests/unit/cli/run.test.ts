@@ -166,7 +166,6 @@ vi.mock('node:readline', () => ({
 import { resolvePhases, createStdinIO, main } from '../../../src/cli/run.js';
 import { scaffoldFrankenbeast, resolveProjectRoot, getProjectPaths } from '../../../src/cli/project-root.js';
 import { resolveBaseBranch } from '../../../src/cli/base-branch.js';
-import { printUsage } from '../../../src/cli/args.js';
 
 // ── Tests ──
 
@@ -391,7 +390,6 @@ describe('main() execution', () => {
 
     await main();
 
-    expect(printUsage).toHaveBeenCalled();
     expect(MockSession).not.toHaveBeenCalled();
   });
 });

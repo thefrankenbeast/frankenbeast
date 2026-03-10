@@ -10,11 +10,27 @@ export const chatServerService: NetworkServiceDefinition = {
   enabled: (config: OrchestratorConfig) => config.chat.enabled,
   describe: (config: OrchestratorConfig) =>
     `Enabled when chat.enabled=true; serves websocket chat on ${config.chat.host}:${config.chat.port}.`,
-  buildRuntimeConfig: (config: OrchestratorConfig) => ({
+  buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
     host: config.chat.host,
     port: config.chat.port,
     url: `http://${config.chat.host}:${config.chat.port}`,
+    healthUrl: `http://${config.chat.host}:${config.chat.port}/health`,
     wsUrl: `ws://${config.chat.host}:${config.chat.port}/v1/chat/ws`,
     model: config.chat.model,
+    process: {
+      command: 'npm',
+      args: [
+        '--workspace',
+        'franken-orchestrator',
+        'run',
+        'chat-server',
+        '--',
+        '--host',
+        config.chat.host,
+        '--port',
+        String(config.chat.port),
+      ],
+      cwd: context.repoRoot,
+    },
   }),
 };

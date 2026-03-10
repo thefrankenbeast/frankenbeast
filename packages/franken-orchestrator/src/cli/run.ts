@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { open } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
 import { existsSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import { parseArgs, printUsage } from './args.js';
 import type { CliArgs } from './args.js';
 import { loadConfig } from './config-loader.js';
@@ -23,6 +25,11 @@ import { CliLlmAdapter } from '../adapters/cli-llm-adapter.js';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { startChatServer } from '../http/chat-server.js';
+import { filterNetworkServices, resolveNetworkServices, type ResolvedNetworkService } from '../network/network-registry.js';
+import { NetworkStateStore } from '../network/network-state-store.js';
+import { NetworkLogStore } from '../network/network-logs.js';
+import { NetworkSupervisor } from '../network/network-supervisor.js';
+import { renderNetworkHelp } from '../network/network-help.js';
 
 /**
  * Creates an InterviewIO backed by stdin/stdout.
@@ -171,12 +178,7 @@ export async function main(): Promise<void> {
   scaffoldFrankenbeast(paths);
 
   if (args.subcommand === 'network') {
-    if (args.networkAction === 'help' || args.networkAction === undefined) {
-      printUsage();
-      return;
-    }
-
-    console.log(`Network command '${args.networkAction}' is not implemented yet.`);
+    await runNetworkCommand(args, config, root, paths);
     return;
   }
 
@@ -269,6 +271,235 @@ export async function main(): Promise<void> {
   if (result && result.status !== 'completed') {
     process.exit(1);
   }
+}
+
+type NetworkPaths = Pick<ReturnType<typeof getProjectPaths>, 'frankenbeastDir'>;
+
+export interface NetworkCommandSupervisorLike {
+  up(options: {
+    services: ResolvedNetworkService[];
+    detached: boolean;
+    mode: 'secure' | 'insecure';
+    secureBackend: string;
+  }): Promise<{ services: { id: string; url?: string | undefined }[] }>;
+  down(): Promise<void>;
+  status(): Promise<{ mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }>;
+  stop(target: string | 'all'): Promise<void>;
+  logs(target: string | 'all'): Promise<string[]>;
+}
+
+export interface NetworkCommandDeps {
+  resolveServices: typeof resolveNetworkServices;
+  createSupervisor: (paths: NetworkPaths) => NetworkCommandSupervisorLike;
+  print: (message: string) => void;
+  printError: (message: string) => void;
+  renderHelp: () => string;
+  waitForShutdown: () => Promise<void>;
+}
+
+function createDefaultNetworkDeps(root: string): NetworkCommandDeps {
+  return {
+    resolveServices: resolveNetworkServices,
+    createSupervisor: (paths) => {
+      const stateStore = new NetworkStateStore(join(paths.frankenbeastDir, 'network', 'state.json'));
+      const logStore = new NetworkLogStore(join(paths.frankenbeastDir, 'network', 'logs'));
+      return new NetworkSupervisor({
+        stateStore,
+        logStore,
+        startService: defaultStartService,
+        stopService: defaultStopService,
+        healthcheck: defaultHealthcheck,
+      });
+    },
+    print: (message: string) => console.log(message),
+    printError: (message: string) => console.error(message),
+    renderHelp: renderNetworkHelp,
+    waitForShutdown: () => waitForTerminationSignal(root),
+  };
+}
+
+async function defaultStartService(
+  service: ResolvedNetworkService,
+  options: { detached: boolean; logFile?: string | undefined },
+): Promise<{ pid: number }> {
+  const processSpec = service.runtimeConfig.process;
+  if (!processSpec) {
+    throw new Error(`Service ${service.id} does not have a runnable entrypoint yet`);
+  }
+
+  if (options.detached) {
+    const handle = await open(options.logFile ?? '/dev/null', 'a');
+    const child = spawn(processSpec.command, processSpec.args, {
+      cwd: processSpec.cwd,
+      env: {
+        ...process.env,
+        ...processSpec.env,
+      },
+      detached: true,
+      stdio: ['ignore', handle.fd, handle.fd],
+    });
+    child.unref();
+    await handle.close();
+    if (!child.pid) {
+      throw new Error(`Failed to start detached service ${service.id}`);
+    }
+    return { pid: child.pid };
+  }
+
+  const child = spawn(processSpec.command, processSpec.args, {
+    cwd: processSpec.cwd,
+    env: {
+      ...process.env,
+      ...processSpec.env,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  child.stdout?.on('data', (chunk) => process.stdout.write(`[${service.id}] ${chunk}`));
+  child.stderr?.on('data', (chunk) => process.stderr.write(`[${service.id}] ${chunk}`));
+
+  if (!child.pid) {
+    throw new Error(`Failed to start service ${service.id}`);
+  }
+
+  return { pid: child.pid };
+}
+
+async function defaultStopService(service: { pid: number }): Promise<void> {
+  try {
+    process.kill(service.pid, 'SIGTERM');
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== 'ESRCH') {
+      throw error;
+    }
+  }
+}
+
+async function defaultHealthcheck(service: { pid: number }): Promise<boolean> {
+  try {
+    process.kill(service.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForTerminationSignal(root: string): Promise<void> {
+  void root;
+  await new Promise<void>((resolve) => {
+    const cleanup = (): void => {
+      process.off('SIGINT', onSignal);
+      process.off('SIGTERM', onSignal);
+      resolve();
+    };
+    const onSignal = (): void => cleanup();
+    process.once('SIGINT', onSignal);
+    process.once('SIGTERM', onSignal);
+  });
+}
+
+function formatStatus(status: { mode?: string; secureBackend?: string; services: Array<{ id: string; status: string }> }): string[] {
+  const lines = [
+    `Mode: ${status.mode ?? 'unknown'}`,
+  ];
+
+  if (status.secureBackend) {
+    lines.push(`Secure backend: ${status.secureBackend}`);
+  }
+
+  for (const service of status.services) {
+    lines.push(`${service.id}: ${service.status}`);
+  }
+
+  return lines;
+}
+
+export async function runNetworkCommand(
+  args: CliArgs,
+  config: OrchestratorConfig,
+  root: string,
+  paths: NetworkPaths,
+  deps: NetworkCommandDeps = createDefaultNetworkDeps(root),
+): Promise<void> {
+  const action = args.networkAction ?? 'help';
+  const supervisor = deps.createSupervisor(paths);
+
+  if (action === 'help') {
+    deps.print(deps.renderHelp());
+    return;
+  }
+
+  if (action === 'config') {
+    deps.print(JSON.stringify({
+      network: config.network,
+      chat: config.chat,
+      dashboard: config.dashboard,
+      comms: config.comms,
+    }, null, 2));
+    return;
+  }
+
+  if (action === 'down') {
+    await supervisor.down();
+    deps.print('Stopped managed services.');
+    return;
+  }
+
+  if (action === 'status') {
+    const status = await supervisor.status();
+    for (const line of formatStatus(status)) {
+      deps.print(line);
+    }
+    return;
+  }
+
+  if (action === 'logs') {
+    const target = args.networkTarget ?? 'all';
+    const logs = await supervisor.logs(target);
+    for (const logFile of logs) {
+      deps.print(logFile);
+    }
+    return;
+  }
+
+  if (action === 'stop') {
+    const target = args.networkTarget ?? 'all';
+    await supervisor.stop(target);
+    deps.print(`Stopped ${target}.`);
+    return;
+  }
+
+  const services = filterNetworkServices(
+    deps.resolveServices(config, { repoRoot: root }),
+    action === 'up' ? undefined : args.networkTarget,
+  );
+
+  if (action === 'restart') {
+    await supervisor.stop(args.networkTarget ?? 'all');
+  }
+
+  if (action === 'up' || action === 'start' || action === 'restart') {
+    const state = await supervisor.up({
+      services,
+      detached: args.networkDetached,
+      mode: config.network.mode,
+      secureBackend: config.network.secureBackend,
+    });
+    deps.print(`Started ${services.length} service${services.length === 1 ? '' : 's'}.`);
+    for (const service of state.services) {
+      if (service.url) {
+        deps.print(`${service.id}: ${service.url}`);
+      }
+    }
+    if (!args.networkDetached) {
+      await deps.waitForShutdown();
+      await supervisor.stop(args.networkTarget ?? 'all');
+    }
+    return;
+  }
+
+  deps.printError(`Unsupported network action: ${action}`);
 }
 
 import { fileURLToPath } from 'node:url';

@@ -16,12 +16,19 @@ export interface NetworkServiceRuntimeConfig {
   port?: number;
   url?: string;
   wsUrl?: string;
+  healthUrl?: string;
   apiUrl?: string;
   model?: string;
   orchestratorWsUrl?: string;
   channels?: Record<string, boolean>;
   composeFile?: string;
   services?: string[];
+  process?: {
+    command: string;
+    args: string[];
+    cwd: string;
+    env?: Record<string, string>;
+  };
 }
 
 export interface NetworkServiceDefinition {
@@ -137,4 +144,41 @@ export function resolveNetworkServices(
       explanation: service.describe(config),
     };
   });
+}
+
+export function filterNetworkServices(
+  services: ResolvedNetworkService[],
+  target: string | undefined,
+): ResolvedNetworkService[] {
+  if (!target || target === 'all') {
+    return services;
+  }
+
+  const included = new Set<NetworkServiceId>();
+  const byId = new Map(services.map((service) => [service.id, service]));
+
+  const include = (serviceId: NetworkServiceId): void => {
+    if (included.has(serviceId)) {
+      return;
+    }
+
+    const service = byId.get(serviceId);
+    if (!service) {
+      throw new Error(`Unknown network service target: ${serviceId}`);
+    }
+
+    for (const dependency of service.dependsOn) {
+      include(dependency);
+    }
+
+    included.add(serviceId);
+  };
+
+  const selectedService = services.find((service) => service.id === target);
+  if (!selectedService) {
+    throw new Error(`Unknown network service target: ${target}`);
+  }
+
+  include(selectedService.id);
+  return services.filter((service) => included.has(service.id));
 }
