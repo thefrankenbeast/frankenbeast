@@ -15,6 +15,7 @@ export interface StartChatServerOptions {
   path?: string;
   allowedOrigins?: string[];
   sessionStoreDir: string;
+  sessionStore?: ISessionStore;
   llm: ILlmClient;
   executionLlm?: ILlmClient;
   projectName: string;
@@ -35,12 +36,16 @@ const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_PORT = 3000;
 const DEFAULT_WS_PATH = '/v1/chat/ws';
 
+export function resolveChatServerSessionStore(options: Pick<StartChatServerOptions, 'sessionStore' | 'sessionStoreDir'>): ISessionStore {
+  return options.sessionStore ?? new FileSessionStore(options.sessionStoreDir);
+}
+
 export async function startChatServer(options: StartChatServerOptions): Promise<ChatServerHandle> {
   const host = options.host ?? DEFAULT_HOST;
   const port = options.port ?? DEFAULT_PORT;
   const path = options.path ?? DEFAULT_WS_PATH;
   const tokenSecret = createSessionTokenSecret();
-  const sessionStore = new FileSessionStore(options.sessionStoreDir);
+  const sessionStore = resolveChatServerSessionStore(options);
   const runtime = createChatRuntime({
     chatLlm: options.llm,
     projectName: options.projectName,

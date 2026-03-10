@@ -21,7 +21,7 @@ export const commsGatewayService: NetworkServiceDefinition = {
   enabled: (config: OrchestratorConfig) => config.comms.enabled || hasEnabledChannels(config),
   describe: (config: OrchestratorConfig) =>
     `Enabled when comms.enabled=true or a channel is enabled; current channel flags slack=${config.comms.slack.enabled} discord=${config.comms.discord.enabled}.`,
-  buildRuntimeConfig: (config: OrchestratorConfig) => ({
+  buildRuntimeConfig: (config: OrchestratorConfig, context) => ({
     host: config.comms.host,
     port: config.comms.port,
     url: `http://${config.comms.host}:${config.comms.port}`,
@@ -29,6 +29,16 @@ export const commsGatewayService: NetworkServiceDefinition = {
     channels: {
       slack: config.comms.slack.enabled,
       discord: config.comms.discord.enabled,
+    },
+    process: {
+      command: 'npm',
+      args: [
+        '--workspace',
+        'franken-comms',
+        'run',
+        'start:network',
+      ],
+      cwd: context.repoRoot,
     },
   }),
 };
