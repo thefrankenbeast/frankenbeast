@@ -35,8 +35,9 @@ export function discordRouter(options: DiscordRouterOptions) {
     // 2. Handle Slash Commands
     if (interaction.type === DiscordInteractionType.APPLICATION_COMMAND) {
       const commandName = interaction.data?.name;
-      const options = interaction.data?.options || [];
-      const query = options.find((opt) => opt.name === 'query')?.value || '';
+      const commandOptions = interaction.data?.options || [];
+      const queryValue = commandOptions.find((opt) => opt.name === 'query')?.value;
+      const query = typeof queryValue === 'string' ? queryValue : '';
 
       const text = commandName === 'franken' ? query : `/${commandName} ${query}`.trim();
 

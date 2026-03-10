@@ -23,14 +23,14 @@ export function telegramRouter(options: TelegramRouterOptions) {
     const update = TelegramUpdateSchema.parse(body);
 
     // 1. Handle incoming message
-    if (update.message && update.message.text) {
+    if (update.message?.text) {
       const msg = update.message;
       
       // Ignore bot's own messages
       if (msg.from.is_bot) return c.json({ ok: true });
 
       // Clean up text if it contains commands
-      const text = msg.text;
+      const text = update.message.text;
       if (msg.entities) {
         for (const entity of msg.entities) {
           if (entity.type === 'bot_command') {
@@ -51,7 +51,7 @@ export function telegramRouter(options: TelegramRouterOptions) {
     }
 
     // 2. Handle inline keyboard callback
-    if (update.callback_query && update.callback_query.data) {
+    if (update.callback_query?.data) {
       const query = update.callback_query;
       const chatId = query.message?.chat.id.toString();
       const userId = query.from.id.toString();
@@ -63,7 +63,7 @@ export function telegramRouter(options: TelegramRouterOptions) {
           externalChannelId: chatId,
         });
 
-        await gateway.handleAction('telegram', sessionId, query.data);
+        await gateway.handleAction('telegram', sessionId, update.callback_query.data);
       }
 
       // Acknowledge callback query

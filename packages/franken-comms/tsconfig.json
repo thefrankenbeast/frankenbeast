@@ -4,7 +4,6 @@
     "outDir": "dist",
     "rootDir": "src",
     "paths": {
-      "@franken/types": ["../franken-types/src/index.ts"],
       "@frankenbeast/comms": ["./src/index.ts"]
     }
   },

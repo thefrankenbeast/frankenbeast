@@ -13,7 +13,7 @@ import {
 import {
   ClientSocketEventSchema,
   type ServerSocketEvent,
-} from './ws-chat-types.js';
+} from '@franken/types';
 
 export interface ChatSocketPeer {
   close(code?: number, reason?: string): void;

@@ -23,51 +23,60 @@ export function createCommsApp(config: CommsConfig): Hono {
   app.get('/health', (c) => c.json({ status: 'ok' }));
 
   // Initialize and register adapters
-  if (config.channels.slack?.enabled && config.channels.slack.token && config.channels.slack.signingSecret) {
-    const slack = config.channels.slack;
-    const adapter = new SlackAdapter({ token: slack.token });
+  const slack = config.channels.slack;
+  if (slack?.enabled && slack.token && slack.signingSecret) {
+    const token = slack.token;
+    const signingSecret = slack.signingSecret;
+    const adapter = new SlackAdapter({ token });
     gateway.registerAdapter(adapter);
     app.route('/slack', slackRouter({
       gateway,
       sessionMapper,
-      signingSecret: slack.signingSecret,
+      signingSecret,
     }));
   }
 
-  if (config.channels.discord?.enabled && config.channels.discord.token && config.channels.discord.publicKey) {
-    const discord = config.channels.discord;
-    const adapter = new DiscordAdapter({ token: discord.token });
+  const discord = config.channels.discord;
+  if (discord?.enabled && discord.token && discord.publicKey) {
+    const token = discord.token;
+    const publicKey = discord.publicKey;
+    const adapter = new DiscordAdapter({ token });
     gateway.registerAdapter(adapter);
     app.route('/discord', discordRouter({
       gateway,
       sessionMapper,
-      publicKey: discord.publicKey,
+      publicKey,
     }));
   }
 
-  if (config.channels.telegram?.enabled && config.channels.telegram.botToken) {
-    const telegram = config.channels.telegram;
-    const adapter = new TelegramAdapter({ token: telegram.botToken });
+  const telegram = config.channels.telegram;
+  if (telegram?.enabled && telegram.botToken) {
+    const botToken = telegram.botToken;
+    const adapter = new TelegramAdapter({ token: botToken });
     gateway.registerAdapter(adapter);
     app.route('/telegram', telegramRouter({
       gateway,
       sessionMapper,
-      botToken: telegram.botToken,
+      botToken,
     }));
   }
 
-  if (config.channels.whatsapp?.enabled && config.channels.whatsapp.accessToken && config.channels.whatsapp.phoneNumberId && config.channels.whatsapp.appSecret && config.channels.whatsapp.verifyToken) {
-    const whatsapp = config.channels.whatsapp;
+  const whatsapp = config.channels.whatsapp;
+  if (whatsapp?.enabled && whatsapp.accessToken && whatsapp.phoneNumberId && whatsapp.appSecret && whatsapp.verifyToken) {
+    const accessToken = whatsapp.accessToken;
+    const phoneNumberId = whatsapp.phoneNumberId;
+    const appSecret = whatsapp.appSecret;
+    const verifyToken = whatsapp.verifyToken;
     const adapter = new WhatsAppAdapter({
-      accessToken: whatsapp.accessToken,
-      phoneNumberId: whatsapp.phoneNumberId,
+      accessToken,
+      phoneNumberId,
     });
     gateway.registerAdapter(adapter);
     app.route('/whatsapp', whatsappRouter({
       gateway,
       sessionMapper,
-      appSecret: whatsapp.appSecret,
-      verifyToken: whatsapp.verifyToken,
+      appSecret,
+      verifyToken,
     }));
   }
 

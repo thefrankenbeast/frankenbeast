@@ -54,6 +54,6 @@ export function slackSignatureMiddleware(options: SlackSignatureOptions) {
     // or provide a way for subsequent handlers to access it.
     // However, Hono's `c.req.text()` can be called multiple times if it's already buffered.
     
-    await next();
+    return await next();
   };
 }

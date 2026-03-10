@@ -40,6 +40,6 @@ export function whatsappSignatureMiddleware(options: WhatsAppSignatureOptions) {
       return c.json({ error: 'Signature verification failed' }, 401);
     }
 
-    await next();
+    return await next();
   };
 }

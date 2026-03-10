@@ -10,7 +10,7 @@ import type {
 
 export interface ChatGatewayOptions {
   orchestratorWsUrl: string;
-  orchestratorToken?: string;
+  orchestratorToken?: string | undefined;
 }
 
 export class ChatGateway extends EventEmitter {
@@ -18,7 +18,7 @@ export class ChatGateway extends EventEmitter {
   private readonly adapters = new Map<ChannelType, ChannelAdapter>();
   private readonly sessionMapper = new SessionMapper();
   private readonly orchestratorWsUrl: string;
-  private readonly orchestratorToken?: string;
+  private readonly orchestratorToken?: string | undefined;
 
   constructor(options: ChatGatewayOptions) {
     super();

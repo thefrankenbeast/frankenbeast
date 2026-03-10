@@ -4,7 +4,7 @@ export interface ChannelInboundMessage {
   channelType: ChannelType;
   externalUserId: string;
   externalChannelId: string;
-  externalThreadId?: string;
+  externalThreadId?: string | undefined;
   externalMessageId: string;
   text: string;
   rawEvent: unknown;

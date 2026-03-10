@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { WebSocketServer } from 'ws';
 import { ChatSocketBridge } from '../../src/core/chat-socket-bridge.js';
-import type { ServerSocketEvent } from '../../../franken-orchestrator/src/http/ws-chat-types.js';
+import type { ServerSocketEvent } from '@franken/types';
 import type { AddressInfo } from 'node:net';
 
 describe('ChatSocketBridge', () => {

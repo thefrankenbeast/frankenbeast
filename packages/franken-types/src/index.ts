@@ -41,3 +41,6 @@ export type { TokenSpend } from './token.js';
 
 // Context
 export type { FrankenContext } from './context.js';
+
+// Comms
+export * from './comms.js';
